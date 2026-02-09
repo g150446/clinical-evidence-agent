@@ -1,6 +1,12 @@
 # Environment variables
 .env
 
+# Data directory - can be regenerated from scripts
+/data/
+
+# Qdrant database
+/qdrant_medical_db/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -37,6 +43,9 @@ env/
 
 # Claude Code
 .claude/
+
+# Model cache
+models/
 
 # OS
 .DS_Store
