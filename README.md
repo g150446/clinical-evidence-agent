@@ -33,9 +33,10 @@ Comprehensive Medical Answer
 
 **1. Qdrant Vector Database**
 - Collections: `medical_papers`, `atomic_facts`
-- Vectors: 4 named vectors per paper, 1 per atomic fact
+- Vectors: 4 named vectors per paper, 1 per atomic fact (5 total types per docs/search-flow.md)
 - Models: SapBERT (768-dim), multilingual-e5 (1024-dim)
-- Size: 298 papers + ~4,172 atomic facts
+- Size: All structured papers + atomic facts
+- Database: `./qdrant_medical_db`
 
 **2. Search Pipeline**
 - Strategy: Vector similarity ranking
@@ -181,58 +182,61 @@ python3 scripts/download_remaining_pharmacologic.py pharmacologic
 
 ### Embedding Generation Scripts
 
-#### `scripts/generate_embeddings_298_final.py`
-**Purpose**: Generate embeddings for all 298 papers and load into Qdrant
+#### `scripts/generate_embeddings.py`
+**Purpose**: Generate embeddings for all structured papers and load into Qdrant
 
-**Input**: All structured papers from `data/obesity/{domain}/*/{subsection}/papers/`
+**Input**: All structured papers from `data/obesity/{domain}/{subsection}/papers/`
 
 **Output**: Qdrant database with all embeddings
 
 **Workflow**:
-1. Initialize Qdrant client with file-based persistence
-2. Delete existing collections (medical_papers, atomic_facts)
-3. Create collections with named vectors:
-   - `medical_papers`: 4 named vectors (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
-   - `atomic_facts`: 1 named vector (sapbert_fact)
+1. Check Qdrant for existing embeddings (deduplication)
+2. Find all structured papers across all 3 domains and subsections
+3. Filter out papers that already have embeddings
 4. Load embedding models (SapBERT + multilingual-e5)
-5. Process each domain:
-   - Iterate through all subsections in domain
-   - Read all structured `PMID_XXX.json` files from each `papers/` directory
+5. Process each paper:
    - Extract PICO, atomic facts, generated questions
-   - Generate embeddings and upsert to Qdrant
+   - Generate 5 embedding types:
+     - `sapbert_pico` (768-dim): PICO matching
+     - `e5_pico` (1024-dim): Fallback vector
+     - `e5_questions_en` (1024-dim): English questions
+     - `e5_questions_ja` (1024-dim): Japanese questions
+     - `sapbert_fact` (768-dim): Atomic facts (per fact)
+   - Upsert to Qdrant collections
 6. Verify collections after completion
+7. Stop on first error (fail-safe behavior)
 
 **Models Used**:
 - `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
 - `intfloat/multilingual-e5-large` (1024-dim)
 
-**Embeddings Generated**:
-- Paper-level: 4 vectors per paper (1,192 total vectors)
-- Atomic facts: 1 vector per fact (~4,172 total vectors)
-- Total vectors: ~5,364 embedding vectors
+**Embeddings Generated** (per docs/search-flow.md):
+- Paper-level: 4 vectors per paper (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
+- Atomic facts: 1 vector per fact (sapbert_fact)
 
 **Qdrant Collections**:
-- `medical_papers`: 297 points (99.7% success rate)
-- `atomic_facts`: 3,088 points
+- `medical_papers`: Paper-level embeddings with 4 named vectors
+- `atomic_facts`: Fact-level embeddings with 1 named vector
 - Database location: `./qdrant_medical_db`
-
-**Performance**:
-- Processing rate: ~0.08 papers/second
-- Success rate: 99.7%
 
 **Usage**:
 ```bash
-python3 scripts/generate_embeddings_298_final.py
+python3 scripts/generate_embeddings.py
 ```
 
 **Key Features**:
-- Resume capability: Can be re-run, only processes missing embeddings
+- Deduplication: Skips papers with existing embeddings
 - Progress reporting: Progress every 10 papers
-- Error handling: Continue on errors (don't stop entire batch)
+- Error handling: Stop on first error (fail-safe)
+- Fixed UUID generation: Correct placement ensures all papers get UUID
+- Qdrant path: `./qdrant_medical_db` for consistency
+- 5 embedding types: Matches search-flow.md specification
 - Verification: Check Qdrant collections after completion
-- Named vectors: Full support for multi-model queries
 
-**Note**: This script successfully generated embeddings for all 298 papers, completing Phase 2
+**Note**: Merged version combining:
+- Fixed UUID generation (from generate_embeddings_fixed.py)
+- Deduplication logic (from generate_embeddings.py)
+- Stop-on-error behavior for reliability
 
 ---
 
@@ -287,7 +291,10 @@ python3 scripts/setup_qdrant.py
    - Japanese: Use `e5_questions_ja` vector (1024-dim)
    - Format: `'query: <user query>'`
 5. Fetch all points from `medical_papers` collection (up to 10K)
-6. Extract vectors and calculate cosine similarity
+6. Extract vectors and calculate cosine similarity with priority order:
+   - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
+   - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
+   - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
 7. Sort by similarity (highest first)
 8. Return top K papers with full metadata
 
@@ -442,6 +449,9 @@ python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" -
 # RAG-enhanced query (Qdrant検索 → MedGemma生成)
 python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode rag
 
+# RAG-enhanced query with detailed evidence information
+python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode rag --verbose
+
 # Compare mode (direct と RAG を並べて比較)
 python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode compare
 
@@ -455,6 +465,7 @@ python3 scripts/medgemma_query.py "肥満治療について教えてください
 - Language detection: Automatic detection via regex
 - Error handling: Timeout and API error handling
 - Structured output: JSON response with metadata
+- **Verbose mode** (--verbose, -v): Show detailed evidence information including retrieved paper IDs, scores, PICO details, and atomic facts list
 
 **Note**: This script provides both direct and RAG-enhanced MedGemma queries, completing Phase 4
 
@@ -643,7 +654,7 @@ data/obesity/
 │   ├── append_fulltext.py            (Full text retrieval)
 │   ├── structure_paper.py          (Single paper structuring)
 │   ├── batch_structure_papers.py  (Batch processing)
-│   ├── generate_embeddings_298_final.py  (Embedding generation)
+│   ├── generate_embeddings.py              (Embedding generation)
 │   ├── setup_qdrant.py             (Qdrant initialization)
 │   ├── search_qdrant.py             (Qdrant search - real models)
 │   ├── medgemma_query.py          (MedGemma queries)
@@ -682,13 +693,19 @@ data/obesity/
 - **Success Rate**: 100% (no failures)
 
 ### 3. Embedding Generation (Phase 2)
-- **Script**: `generate_embeddings_298_final.py`
-- **Input**: 298 structured papers
+- **Script**: `generate_embeddings.py`
+- **Input**: Structured papers from all domains
 - **Output**: Qdrant database with all embeddings
-- **Coverage**: 297/298 papers (99.7%)
-- **Embeddings**: 4,276 vectors (1,192 paper-level + 3,088 atomic facts)
+- **Coverage**: All papers (deduplication skips existing)
+- **Embeddings**: 5 types (4 paper-level + 1 per fact)
+  - `sapbert_pico` (768-dim): PICO matching
+  - `e5_pico` (1024-dim): Fallback vector
+  - `e5_questions_en` (1024-dim): English questions
+  - `e5_questions_ja` (1024-dim): Japanese questions
+  - `sapbert_fact` (768-dim): Atomic facts
 - **Time**: ~25 minutes for all papers
-- **Success Rate**: 99.7%
+- **Success Rate**: Stops on error (fail-safe)
+- **Database**: `./qdrant_medical_db`
 
 ### 4. Search Pipeline (Phase 3)
 - **Script**: `search_qdrant.py`
@@ -719,12 +736,21 @@ data/obesity/
   - Dimension: 768
   - Purpose: Medical concept embeddings
   - Usage: PICO summaries, atomic facts
-  
+  - Embedding types: `sapbert_pico` (768), `sapbert_fact` (768)
+
 - **multilingual-e5**: `intfloat/multilingual-e5-large`
   - Dimension: 1024
   - Purpose: Question embeddings, PICO summaries with passage prefix
   - Prefixes: `query:` (questions), `passage:` (PICO)
   - Languages: English, Japanese, Chinese, 14 European languages
+  - Embedding types: `e5_pico` (1024), `e5_questions_en` (1024), `e5_questions_ja` (1024)
+
+**Total Embedding Types**: 5 (per docs/search-flow.md)
+1. `sapbert_pico` (768) - Step 2: PICO matching
+2. `e5_pico` (1024) - Fallback vector
+3. `e5_questions_en` (1024) - Step 1: English questions
+4. `e5_questions_ja` (1024) - Step 1: Japanese questions
+5. `sapbert_fact` (768) - Step 3: Atomic facts
 
 ### LLM Model
 - **MedGemma 7b**: `medgemma:7b` (via Ollama)
@@ -734,11 +760,16 @@ data/obesity/
 
 ### Vector Database
 - **Qdrant**: Open-source vector similarity search engine
-  - Mode: Local file-based (for portability)
+  - Mode: Local file-based at `./qdrant_medical_db`
   - Collections: 2 (medical_papers, atomic_facts)
   - Vectors: 5 named vectors (4 per paper + 1 per fact)
+    - `sapbert_pico` (768): PICO matching
+    - `e5_pico` (1024): Fallback vector
+    - `e5_questions_en` (1024): English questions
+    - `e5_questions_ja` (1024): Japanese questions
+    - `sapbert_fact` (768): Atomic facts
   - Distance Metric: Cosine similarity
-  - Size: 297 points + 3,088 points = 3,385 points
+  - Size: All structured papers + atomic facts
 
 ---
 
@@ -772,12 +803,14 @@ data/obesity/
 - **Average Time**: ~30 seconds per paper
 
 ### Embedding Generation
-- **Total Papers**: 297/298 (99.7%)
-- **Total Vectors**: 4,276 vectors
-  - Paper-level: 1,192 vectors (4 per paper)
-  - Atomic facts: 3,088 vectors (1 per fact)
+- **Total Papers**: All structured papers (deduplication skips existing)
+- **Total Vectors**: 5 types per paper (4 paper-level + 1 per fact)
+  - Paper-level: 4 vectors (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
+  - Atomic facts: 1 vector (sapbert_fact) per fact
 - **Processing Time**: ~25 minutes for all papers
-- **Processing Rate**: ~0.08 papers/second (298 papers in 25 min)
+- **Processing Rate**: ~0.08 papers/second
+- **Error Handling**: Stops on first error (fail-safe)
+- **Database**: `./qdrant_medical_db`
 
 ### Search Performance
 - **Database Size**: 298 papers + 3,088 atomic facts
@@ -814,8 +847,11 @@ export OLLAMA_MODEL="medgemma:7b"
 
 ### Database Initialization
 ```bash
-# Setup Qdrant collections
+# Setup Qdrant collections (if needed)
 python3 scripts/setup_qdrant.py
+
+# Generate embeddings for all papers
+python3 scripts/generate_embeddings.py
 ```
 
 ---
@@ -1051,10 +1087,42 @@ print(f'Payload: {scroll_result[0][0].payload}')
 
 ### v1.0 (2026-02-02) - Initial System
 - Data structuring for 298 papers
-- Embedding generation for all 298 papers
+- Embedding generation for all papers (5 types per paper)
 - Qdrant search pipeline with real models
 - MedGemma integration (direct and RAG)
 - Full end-to-end workflow
+
+### v1.1 (2026-02-09) - Embedding Script Update
+- Merged embedding generation scripts (generate_embeddings.py)
+- Fixed UUID generation bug
+- Added deduplication logic
+- Updated to match docs/search-flow.md specification (5 embedding types)
+- Qdrant path: ./qdrant_medical_db
+- Stop-on-error behavior for reliability
+
+### v1.2 (2026-02-10) - Search Vector Priority Optimization
+- **Problem**: `e5_questions_en` vector had limited matching for general queries (e.g., "treatment for osteoarthritis")
+- **Root cause**: Individual questions focus on specific metrics rather than broader PICO keywords
+- **Solution**: Implemented vector priority order in `search_qdrant.py`:
+  - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
+  - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
+  - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
+- **Result**: PMID 39476339 (semaglutide + knee osteoarthritis) now ranks #1 for query "treatment for osteoarthritis"
+- **Files updated**:
+  - `scripts/search_qdrant.py`: Vector priority selection logic added
+  - `docs/search-flow.md`: Updated Step 2 description with vector selection rationale
+  - `README.md`: Updated search workflow with priority order explanation
+
+### v1.3 (2026-02-10) - MedGemma Query Verbose Mode
+- **Problem**: RAG mode did not provide clear visibility into which papers and evidence were retrieved
+- **Root cause**: Answer only showed aggregated summary without listing individual paper IDs, scores, and PICO details
+- **Solution**: Added `--verbose` (`-v`) flag to `medgemma_query.py`:
+  - Shows detailed retrieved paper information (PMID, Title, Journal, Year, Score, PICO)
+  - Lists all retrieved atomic facts with details
+  - Better visual feedback of evidence retrieval process
+- **Files updated**:
+  - `scripts/medgemma_query.py`: Added argparse support, verbose parameter to all functions, detailed logging for retrieved papers and facts
+  - `README.md`: Updated usage examples and key features to document verbose flag
 
 ---
 

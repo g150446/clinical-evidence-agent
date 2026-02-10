@@ -8,6 +8,7 @@ Can be imported by other scripts or run directly
 import requests
 import json
 import time
+import argparse
 
 
 def query_ollama(prompt, model="medgemma", temperature=0.1, timeout=120, stream=False):
@@ -92,15 +93,16 @@ def query_ollama(prompt, model="medgemma", temperature=0.1, timeout=120, stream=
         }
 
 
-def ask_medgemma_direct(query, model="medgemma", temperature=0.1, timeout=120):
+def ask_medgemma_direct(query, model="medgemma", temperature=0.1, timeout=120, verbose=False):
     """
     Query MedGemma directly without retrieval (baseline comparison)
     
     Args:
         query: User question
         model: Model name (default: "medgemma")
-        temperature: Temperature (default: 0.1)
+        temperature: Temperature (default: 0.1 for accuracy)
         timeout: Timeout in seconds (default: 120)
+        verbose: Show detailed information (default: False)
     
     Returns:
         dict with answer, timing, error
@@ -133,7 +135,7 @@ Answer:"""
     }
 
 
-def build_prompt_with_qdrant(papers, atomic_facts, query, language='en'):
+def build_prompt_with_qdrant(papers, atomic_facts, query, language='en', verbose=False):
     """
     Build prompt for MedGemma using retrieved Qdrant data
     
@@ -142,12 +144,31 @@ def build_prompt_with_qdrant(papers, atomic_facts, query, language='en'):
         atomic_facts: List of relevant atomic facts
         query: Original user query
         language: Query language ('en' or 'ja')
+        verbose: Show detailed evidence information
     
     Returns:
         Formatted prompt string
     """
     
     # Build papers summary
+    if verbose:
+        print("\n検索された論文詳細:")
+        for i, paper in enumerate(papers, 1):
+            metadata = paper.get('metadata', {})
+            pico = paper.get('pico_en', {})
+            print(f"\n論文 {i}:")
+            print(f"  PMID: {paper.get('paper_id', 'Unknown')}")
+            print(f"  Title: {metadata.get('title', 'Unknown')}")
+            print(f"  Journal: {metadata.get('journal', 'Unknown')} ({metadata.get('publication_year', 'Unknown')})")
+            print(f"  Score: {paper.get('score', 'N/A')}")
+            print(f"  PICO Patient: {pico.get('patient', 'N/A')}")
+            print(f"  PICO Intervention: {pico.get('intervention', 'N/A')}")
+            print(f"  PICO Outcome: {pico.get('outcome', 'N/A')}")
+        
+        print(f"\nアトミックファクト ({len(atomic_facts)} 件):")
+        for i, fact in enumerate(atomic_facts[:5], 1):
+            print(f"  {i+1}. {fact}")
+    
     papers_summary = ""
     for i, paper in enumerate(papers[:3], 1):  # Top 3 papers
         metadata = paper.get('metadata', {})
@@ -209,7 +230,7 @@ Answer:"""
     return template
 
 
-def ask_medgemma_with_qdrant(papers, atomic_facts, query, language='en', model="medgemma", temperature=0.1, timeout=120):
+def ask_medgemma_with_qdrant(papers, atomic_facts, query, language='en', model="medgemma", temperature=0.1, timeout=120, verbose=False):
     """
     Query MedGemma with Qdrant retrieval (RAG - Retrieval Augmented Generation)
     
@@ -221,11 +242,12 @@ def ask_medgemma_with_qdrant(papers, atomic_facts, query, language='en', model="
         model: Model name (default: "medgemma")
         temperature: Temperature (default: 0.1)
         timeout: Timeout in seconds (default: 120)
+        verbose: Show detailed evidence information (default: False)
     
     Returns:
         dict with answer, timing, retrieved_context, error
     """
-    prompt = build_prompt_with_qdrant(papers, atomic_facts, query, language)
+    prompt = build_prompt_with_qdrant(papers, atomic_facts, query, language, verbose=verbose)
     
     result = query_ollama(
         prompt=prompt,
@@ -245,36 +267,47 @@ def ask_medgemma_with_qdrant(papers, atomic_facts, query, language='en', model="
     }
 
 
-def run_rag_query(query):
+def run_rag_query(query, verbose=False):
     """RAGモード: Qdrant検索 → MedGemma生成"""
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import search_qdrant  # lazy import
-
+    
     print("1. Qdrant検索実行...")
     search_results = search_qdrant.search_medical_papers(query, top_k=5)
     papers = search_results['papers']
     language = search_results.get('query_language', 'en')
-
+    
+    if verbose:
+        print(f"   ✓ 言語検出: {language}")
+        print(f"   ✓ 論文数: {len(papers)}")
+    
     print("2. Atomic Facts検索実行...")
     facts_raw = search_qdrant.search_atomic_facts(query, limit=5)
     atomic_facts = [f['fact_text'] for f in facts_raw]  # 文字列リストに変換
-
+    
+    if verbose:
+        print(f"   ✓ アトミックファクト数: {len(atomic_facts)}")
+    
     print("3. MedGemma生成実行...")
-    return ask_medgemma_with_qdrant(papers, atomic_facts, query, language=language)
+    return ask_medgemma_with_qdrant(papers, atomic_facts, query, language=language, verbose=verbose)
 
 
-def compare_approaches(query, model="medgemma"):
+def compare_approaches(query, model="medgemma", verbose=False):
     """
     Run both direct and Qdrant-augmented queries for comparison
     
     Args:
         query: User question
         model: Model name (default: "medgemma")
+        verbose: Show detailed information (default: False)
     
     Returns:
         dict with direct_result, qdrant_result, comparison
     """
+    if verbose:
+        print("\n比較モードの詳細ログを有効にしています\n")
+    
     print("="*70)
     print(f"Comparing MedGemma Approaches")
     print("="*70)
@@ -282,7 +315,7 @@ def compare_approaches(query, model="medgemma"):
     
     # Direct query (baseline)
     print("1. Direct Query (No Retrieval)...")
-    direct_result = ask_medgemma_direct(query, model=model)
+    direct_result = ask_medgemma_direct(query, model=model, verbose=verbose)
     
     if direct_result.get('error'):
         print(f"   ✗ Error: {direct_result.get('error')}")
@@ -299,7 +332,7 @@ def compare_approaches(query, model="medgemma"):
     # Qdrant-augmented query (with retrieval)
     print("2. Qdrant-Augmented Query (RAG)...")
     try:
-        qdrant_result = run_rag_query(query)
+        qdrant_result = run_rag_query(query, verbose=verbose)
         if qdrant_result.get('error'):
             print(f"   ✗ Error: {qdrant_result.get('error')}")
         else:
@@ -309,7 +342,7 @@ def compare_approaches(query, model="medgemma"):
     except Exception as e:
         print(f"   ✗ RAG query failed: {e}")
         qdrant_result = {'error': str(e)}
-
+    
     return {
         'query': query,
         'direct_result': direct_result,
@@ -322,41 +355,27 @@ def main():
     """Main entry point for direct usage"""
     import sys
     
-    if len(sys.argv) < 2:
-        print("Usage: python3 medgemma_query.py <query> [--mode <direct|rag|compare>]")
-        print("\nModes:")
-        print("  direct     - Query MedGemma directly (baseline, default)")
-        print("  rag        - Qdrant検索 → MedGemma生成 (RAG)")
-        print("  compare    - Run both direct and RAG, side by side")
-        print("\nExamples:")
-        print("  python3 medgemma_query.py 'Does semaglutide reduce weight in obesity?'")
-        print("  python3 medgemma_query.py 'Does semaglutide reduce weight in obesity?' --mode rag")
-        print("  python3 medgemma_query.py 'Does semaglutide reduce weight in obesity?' --mode compare")
-        return
+    parser = argparse.ArgumentParser(description='MedGemma Query Module - Direct and RAG modes')
+    parser.add_argument('query', help='Medical question to ask MedGemma')
+    parser.add_argument('--mode', choices=['direct', 'rag', 'compare'], default='direct', help='Query mode (default: direct)')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed evidence information')
     
-    # Parse arguments
-    query = None
-    mode = 'direct'
-    
-    for i, arg in enumerate(sys.argv[1:]):
-        if arg == '--mode' and i + 1 < len(sys.argv[1:]):
-            mode = sys.argv[1:][i + 1]
-        elif not arg.startswith('--'):
-            if query is None:
-                query = arg
-            else:
-                query += ' ' + arg
+    args = parser.parse_args()
+    query = args.query
+    mode = args.mode
+    verbose = args.verbose
     
     if not query:
         print("Error: No query provided")
+        parser.print_help()
         return
     
     if mode == 'compare':
-        result = compare_approaches(query)
+        result = compare_approaches(query, verbose=verbose)
     elif mode == 'rag':
-        result = run_rag_query(query)
+        result = run_rag_query(query, verbose=verbose)
     else:
-        result = ask_medgemma_direct(query)
+        result = ask_medgemma_direct(query, verbose=verbose)
     
     # Print result
     print(f"\n{'='*70}")

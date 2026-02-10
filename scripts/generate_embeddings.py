@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Generate embeddings for all obesity treatment papers
-Processes pharmacologic, surgical, and lifestyle domains sequentially
+Merged version with:
+- Fixed UUID generation (from generate_embeddings_fixed.py)
+- Deduplication logic (from generate_embeddings.py)
+- Qdrant path: ./qdrant_medical_db
+- Stops on error
 """
 
 from qdrant_client import QdrantClient
@@ -12,17 +16,43 @@ import json
 import numpy as np
 import time
 import uuid
-from openai import OpenAI
+import logging
+import subprocess
 
-# Initialize Qdrant client (use local database)
-# Note: Initialize client without path to ensure clean state
-client = QdrantClient()
+# Suppress sentence-transformers INFO/DEBUG logs
+logging.getLogger('sentence_transformers').setLevel(logging.ERROR)
+
+def get_cache_size(model_path):
+    """Get cache size in MB for a given HuggingFace model path"""
+    try:
+        result = subprocess.run(
+            ['du', '-sh', model_path],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.split()[0]
+    except:
+        pass
+    return "Unknown"
+
+# Initialize Qdrant client with path parameter
+print("Initializing Qdrant client...")
+client = QdrantClient(path="./qdrant_medical_db")
+print("✓ Qdrant client initialized")
 
 # Load models (use default HuggingFace cache)
-print("Loading embedding models...")
-print("(Models will be cached in ~/.cache/huggingface)")
-print("If this is your first run, models will be downloaded (~3.6GB total)")
-print()
+print("\nLoading embedding models...")
+print("(Models are cached in ~/.cache/huggingface)")
+
+# Load SapBERT
+sapbert_cache = Path.home() / '.cache/huggingface/hub/models--cambridgeltl--SapBERT-from-PubMedBERT-fulltext'
+if sapbert_cache.exists():
+    size = get_cache_size(sapbert_cache)
+    print(f"Loading SapBERT from cache ({size})...")
+else:
+    print("Loading SapBERT (first run - will download ~420MB)...")
 
 try:
     sapbert = SentenceTransformer(
@@ -32,6 +62,14 @@ try:
 except Exception as e:
     print(f"✗ Error loading SapBERT: {e}")
     raise
+
+# Load multilingual-e5
+e5_cache = Path.home() / '.cache/huggingface/hub/models--intfloat--multilingual-e5-large'
+if e5_cache.exists():
+    size = get_cache_size(e5_cache)
+    print(f"Loading multilingual-e5 from cache ({size})...")
+else:
+    print("Loading multilingual-e5 (first run - will download ~2.4GB)...")
 
 try:
     multilingual_e5 = SentenceTransformer(
@@ -45,12 +83,13 @@ except Exception as e:
 print("✓ All models loaded\n")
 
 
-def process_paper(paper_path, paper_id, processed_pmids):
+def process_paper(paper_path):
     """Process single paper and generate embeddings
     
     Returns:
         success: bool
         paper_id: str
+        paper_uuid: str (UUID for Qdrant)
         points_count: int (main collection + atomic facts)
     """
     
@@ -60,7 +99,7 @@ def process_paper(paper_path, paper_id, processed_pmids):
             paper = json.load(f)
         
         # Extract data
-        paper_id_orig = paper.get('paper_id', '')
+        paper_id = paper.get('paper_id', '')
         pico = paper['language_independent_core'].get('pico_en', {})
         atomic_facts = paper['language_independent_core'].get('atomic_facts_en', [])
         metadata = paper.get('metadata', {})
@@ -68,22 +107,22 @@ def process_paper(paper_path, paper_id, processed_pmids):
         # Check for generated questions
         if 'multilingual_interface' not in paper:
             print(f"  ! Missing multilingual_interface in {paper_id}")
-            return False, paper_path.stem, 0
+            return False, None, None, 0
         
         questions_en = paper['multilingual_interface'].get('generated_questions', {}).get('en', [])
         questions_ja = paper['multilingual_interface'].get('generated_questions', {}).get('ja', [])
         
-        # 1. SapBERT PICO embedding
+        # 1. SapBERT PICO embedding (768 dim)
         pico_combined = f"{pico.get('patient', '')} {pico.get('intervention', '')} {pico.get('comparison', '')} {pico.get('outcome', '')}"
         sapbert_pico_vec = sapbert.encode(pico_combined, normalize_embeddings=True)
         
-        # 2. E5 PICO embedding (with passage: prefix)
+        # 2. E5 PICO embedding (1024 dim, with passage: prefix)
         e5_pico_vec = multilingual_e5.encode(
             f"passage: {pico_combined}", 
             normalize_embeddings=True
         )
         
-        # 3. E5 English questions (average with query: prefix)
+        # 3. E5 English questions (1024 dim, average with query: prefix)
         if questions_en:
             e5_q_en_vecs = [
                 multilingual_e5.encode(f"query: {q}", normalize_embeddings=True)
@@ -93,7 +132,7 @@ def process_paper(paper_path, paper_id, processed_pmids):
         else:
             e5_questions_en_vec = np.zeros(1024, dtype=np.float32)
         
-        # 4. E5 Japanese questions (average with query: prefix)
+        # 4. E5 Japanese questions (1024 dim, average with query: prefix)
         if questions_ja:
             e5_q_ja_vecs = [
                 multilingual_e5.encode(f"query: {q}", normalize_embeddings=True)
@@ -103,10 +142,10 @@ def process_paper(paper_path, paper_id, processed_pmids):
         else:
             e5_questions_ja_vec = np.zeros(1024, dtype=np.float32)
         
-            # Generate unique UUID for paper
-            paper_uuid = str(uuid.uuid4())
+        # Generate unique UUID for paper (FIXED: correctly placed at top level)
+        paper_uuid = str(uuid.uuid4())
         
-        # 5. Upsert to medical_papers collection
+        # 5. Upsert to medical_papers collection (4 named vectors)
         client.upsert(
             collection_name="medical_papers",
             points=[
@@ -119,7 +158,8 @@ def process_paper(paper_path, paper_id, processed_pmids):
                         "e5_questions_ja": e5_questions_ja_vec.tolist()
                     },
                     payload={
-                        "paper_id": paper_id_orig,
+                        "json_path": str(paper_path),
+                        "paper_id": paper_id,
                         "pico_en": pico,
                         "metadata": metadata,
                         "mesh_terms": metadata.get('mesh_terms', [])
@@ -128,7 +168,7 @@ def process_paper(paper_path, paper_id, processed_pmids):
             ]
         )
         
-        # 6. Atomic facts (separate collection)
+        # 6. Atomic facts (separate collection, 1 named vector per fact)
         atomic_points = []
         for idx, fact in enumerate(atomic_facts):
             fact_uuid = str(uuid.uuid4())
@@ -138,7 +178,8 @@ def process_paper(paper_path, paper_id, processed_pmids):
                     id=fact_uuid,
                     vector={"sapbert_fact": fact_vec.tolist()},
                     payload={
-                        "paper_id": paper_id_orig,
+                        "json_path": str(paper_path),
+                        "paper_id": paper_id,
                         "fact_text": fact,
                         "fact_index": idx
                     }
@@ -150,18 +191,18 @@ def process_paper(paper_path, paper_id, processed_pmids):
             points=atomic_points
         )
         
-        return True, paper_id, 1 + len(atomic_points)
+        return True, paper_id, paper_uuid, 1 + len(atomic_points)
         
     except Exception as e:
         print(f"  ✗ Error processing {paper_path.name}: {e}")
-        return False, paper_path.stem, 0
+        return False, paper_path.stem, None, 0
 
 
 def main():
     """Process all structured papers"""
     
     print("="*70)
-    print("Qdrant Embedding Generation")
+    print("Qdrant Embedding Generation (Merged Version)")
     print("="*70)
     
     # Check which papers actually have embeddings in Qdrant
@@ -246,7 +287,7 @@ def main():
         
         print(f"[{idx}/{len(papers_to_process)}] {domain}/{subsection}/{paper_file.name} - Generating embeddings...")
         
-        success, paper_id, points = process_paper(paper_file, paper_id, existing_pmids)
+        success, paper_id, paper_uuid, points = process_paper(paper_file)
         
         if success:
             success_count += 1
@@ -261,8 +302,8 @@ def main():
             error_count += 1
             print(f"  ✗ Failed to generate embeddings for {paper_id}")
             
-            # Stop on error (Option B)
-            print(f"\n✗ Error detected. Stopping processing as per Option B.")
+            # Stop on error
+            print(f"\n✗ Error detected. Stopping processing.")
             break
     
     elapsed_time = time.time() - start_time

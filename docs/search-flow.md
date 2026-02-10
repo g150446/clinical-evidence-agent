@@ -30,10 +30,10 @@
 ```python
 # 論文単位のNamed Vectors
 vectors_config={
-    "sapbert_pico": VectorParams(size=768, distance=Distance.COSINE),      # Step 2用
-    "e5_pico": VectorParams(size=1024, distance=Distance.COSINE),         # フォールバック用
-    "e5_questions_en": VectorParams(size=1024, distance=Distance.COSINE), # Step 1用 (EN)
-    "e5_questions_ja": VectorParams(size=1024, distance=Distance.COSINE)  # Step 1用 (JA)
+    "sapbert_pico": VectorParams(size=768, distance=Distance.COSINE),      # Step 2用（優先順位3：フォールバック）
+    "e5_pico": VectorParams(size=1024, distance=Distance.COSINE),         # Step 1優先（優先順位1）
+    "e5_questions_en": VectorParams(size=1024, distance=Distance.COSINE), # Step 2用（優先順位2）
+    "e5_questions_ja": VectorParams(size=1024, distance=Distance.COSINE)  # Step 1用（優先順位1）
 }
 
 ```

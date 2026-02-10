@@ -10,6 +10,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import sys
 import time
+import argparse
+import logging
 
 # Initialize Qdrant client
 print("Initializing Qdrant client...")
@@ -36,6 +38,25 @@ except Exception as e:
 print("✓ All models loaded\n")
 
 
+def setup_logging(log_file=None):
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.handlers = []
+    
+    formatter = logging.Formatter('%(message)s')
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    if log_file:
+        file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='w')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
+    return logger
+
+
 def search_by_vector_similarity(query_vec, collection_name, limit=10):
     """Search by manual vector similarity
     
@@ -47,7 +68,8 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
     Returns:
         List of papers with similarity scores
     """
-    print(f"  Fetching all points from {collection_name}...")
+    logger = logging.getLogger()
+    logger.info(f"  Fetching all points from {collection_name}...")
     
     try:
         # Fetch all points from Qdrant
@@ -59,14 +81,18 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
         )
         
         all_points = scroll_result[0]
-        print(f"  ✓ Fetched {len(all_points)} points from {collection_name}")
+        logger.info(f"  ✓ Fetched {len(all_points)} points from {collection_name}")
         
         if not all_points:
             return []
         
         # Extract vectors and payloads
-        if 'e5_questions_en' in all_points[0].vector:
-            # Using e5_questions_en vector (1024-dim)
+        if 'e5_pico' in all_points[0].vector:
+            # Using e5_pico vector (1024-dim) - PICO combined
+            vectors = np.array([point.vector['e5_pico'] for point in all_points])
+            vector_name = "e5_pico"
+        elif 'e5_questions_en' in all_points[0].vector:
+            # Using e5_questions_en vector (1024-dim) - generated questions
             vectors = np.array([point.vector['e5_questions_en'] for point in all_points])
             vector_name = "e5_questions_en"
         else:
@@ -74,7 +100,7 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
             vectors = np.array([point.vector['sapbert_pico'] for point in all_points])
             vector_name = "sapbert_pico"
         
-        print(f"  Using {vector_name} vectors ({vectors.shape[1]}-dim)")
+        logger.info(f"  Using {vector_name} vectors ({vectors.shape[1]}-dim)")
         
         # Calculate cosine similarity
         similarities = cosine_similarity([query_vec], vectors)[0]
@@ -89,17 +115,18 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
             score = similarities[idx]
             
             results.append({
+                'json_path': point.payload.get('json_path', ''),
                 'paper_id': point.payload.get('paper_id', ''),
                 'score': float(score),
                 'pico_en': point.payload.get('pico_en', {}),
                 'metadata': point.payload.get('metadata', {})
             })
         
-        print(f"  ✓ Found {len(results)} results by similarity")
+        logger.info(f"  ✓ Found {len(results)} results by similarity")
         return results
         
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        logger.info(f"  ✗ Error: {e}")
         return []
 
 
@@ -113,20 +140,21 @@ def search_medical_papers(query, top_k=10):
     Returns:
         Dictionary with search results
     """
+    logger = logging.getLogger()
     start_time = time.time()
     
-    print("="*70)
-    print("Medical Paper Search")
-    print("="*70)
-    print(f"Query: {query}\n")
+    logger.info("="*70)
+    logger.info("Medical Paper Search")
+    logger.info("="*70)
+    logger.info(f"Query: {query}\n")
     
     # Detect language (simple heuristic)
     import re
     lang = 'ja' if re.search(r'[\u3040-\u309F]', query) else 'en'
-    print(f"Language detected: {lang}\n")
+    logger.info(f"Language detected: {lang}\n")
     
     # Generate query embedding
-    print("Generating query embedding...")
+    logger.info("Generating query embedding...")
     
     if lang == 'en':
         # Use e5_questions_en vector (1024-dim)
@@ -144,19 +172,19 @@ def search_medical_papers(query, top_k=10):
         vector_name = "e5_questions_ja"
     
     query_vec = np.array(query_vec)
-    print(f"  Generated {len(query_vec)}-dim vector")
-    print()
+    logger.info(f"  Generated {len(query_vec)}-dim vector")
+    logger.info("")
     
     # Search by vector similarity
-    print(f"Searching medical_papers using {vector_name}...")
+    logger.info(f"Searching medical_papers using {vector_name}...")
     papers = search_by_vector_similarity(
-        query_vec, 
-        "medical_papers", 
+        query_vec,
+        "medical_papers",
         limit=top_k
     )
     
     if not papers:
-        print("  No results found")
+        logger.info("  No results found")
     
     elapsed_time = (time.time() - start_time) * 1000
     
@@ -180,12 +208,13 @@ def search_atomic_facts(query, limit=5):
     Returns:
         List of atomic facts with scores
     """
-    print(f"Searching atomic_facts...")
+    logger = logging.getLogger()
+    logger.info(f"Searching atomic_facts...")
     
     # Use SapBERT for atomic facts (768-dim)
     query_vec = sapbert.encode(query, normalize_embeddings=True)
     query_vec = np.array(query_vec)
-    print(f"  Generated {len(query_vec)}-dim SapBERT query vector")
+    logger.info(f"  Generated {len(query_vec)}-dim SapBERT query vector")
     
     # Fetch all atomic facts
     try:
@@ -197,14 +226,14 @@ def search_atomic_facts(query, limit=5):
         )
         
         all_facts = scroll_result[0]
-        print(f"  ✓ Fetched {len(all_facts)} atomic facts")
+        logger.info(f"  ✓ Fetched {len(all_facts)} atomic facts")
         
         if not all_facts:
             return []
         
         # Extract SapBERT vectors (768-dim)
         vectors = np.array([fact.vector['sapbert_fact'] for fact in all_facts])
-        print(f"  Using sapbert_fact vectors ({vectors.shape[1]}-dim)")
+        logger.info(f"  Using sapbert_fact vectors ({vectors.shape[1]}-dim)")
         
         # Calculate cosine similarity
         similarities = cosine_similarity([query_vec], vectors)[0]
@@ -219,81 +248,91 @@ def search_atomic_facts(query, limit=5):
             score = similarities[idx]
             
             results.append({
+                'json_path': fact.payload.get('json_path', ''),
                 'paper_id': fact.payload.get('paper_id', ''),
                 'fact_text': fact.payload.get('fact_text', ''),
                 'score': float(score)
             })
         
-        print(f"  ✓ Found {len(results)} atomic facts")
+        logger.info(f"  ✓ Found {len(results)} atomic facts")
         return results
         
     except Exception as e:
-        print(f"  ✗ Error: {e}")
+        logger.info(f"  ✗ Error: {e}")
         return []
 
 
 def main():
     """Main entry point"""
     
+    parser = argparse.ArgumentParser(description='Qdrant medical paper search')
+    parser.add_argument('query', nargs='?', help='Search query')
+    parser.add_argument('-o', '--log-file', help='Output log to file')
+    args = parser.parse_args()
+    
+    logger = setup_logging(args.log_file)
+    
     # Get query from command line
-    query = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else "semaglutide 2.4 mg weight loss"
+    query = args.query if args.query else "semaglutide 2.4 mg weight loss"
     
     # Perform search
     results = search_medical_papers(query, top_k=5)
     
     # Print results
-    print(f"\n{'='*70}")
-    print("Search Results")
-    print(f"{'='*70}")
-    print(f"Query: {results['query']}")
-    print(f"Language: {results['query_language']}")
-    print(f"Strategy: {results['search_strategy']}")
-    print(f"\nTop Papers:")
+    logger.info(f"\n{'='*70}")
+    logger.info("Search Results")
+    logger.info(f"{'='*70}")
+    logger.info(f"Query: {results['query']}")
+    logger.info(f"Language: {results['query_language']}")
+    logger.info(f"Strategy: {results['search_strategy']}")
+    logger.info(f"\nTop Papers:")
     
     for i, paper in enumerate(results['papers'], 1):
-        print(f"\n{i}. PMID: {paper['paper_id']} (score: {paper['score']:.3f})")
-        print(f"   Title: {paper['metadata'].get('title', '')}...")
-        print(f"   PICO:")
-        print(f"     Patient: {paper['pico_en'].get('patient', '')[:50]}...")
-        print(f"     Intervention: {paper['pico_en'].get('intervention', '')[:50]}...")
-        print(f"     Outcome: {paper['pico_en'].get('outcome', '')[:50]}...")
+        logger.info(f"\n{i}. PMID: {paper['paper_id']} (score: {paper['score']:.3f})")
+        logger.info(f"   JSON: {paper['json_path']}")
+        logger.info(f"   Title: {paper['metadata'].get('title', '')}")
+        logger.info(f"   PICO:")
+        logger.info(f"     Patient: {paper['pico_en'].get('patient', '')}")
+        logger.info(f"     Intervention: {paper['pico_en'].get('intervention', '')}")
+        logger.info(f"     Outcome: {paper['pico_en'].get('outcome', '')}")
     
     # Search atomic facts
-    print(f"\n{'='*70}")
-    print("Atomic Facts:")
+    logger.info(f"\n{'='*70}")
+    logger.info("Atomic Facts:")
     atomic_facts = search_atomic_facts(query, limit=5)
     
     for i, fact in enumerate(atomic_facts[:3], 1):
-        print(f"{i}. {fact['fact_text'][:70]}... (score: {fact['score']:.3f})")
+        logger.info(f"{i}. [{fact['paper_id']}] {fact['fact_text']} (score: {fact['score']:.3f})")
+        logger.info(f"   JSON: {fact['json_path']}")
     
-    print(f"\n{'='*70}")
-    print("Search Complete")
-    print(f"{'='*70}")
-    print(f"\nTotal papers: {len(results['papers'])}")
-    print(f"Total atomic facts: {len(atomic_facts)}")
-    print(f"Search time: {results['search_time_ms']:.0f}ms")
-    print(f"Note: {results['note']}")
+    logger.info(f"\n{'='*70}")
+    logger.info("Search Complete")
+    logger.info(f"{'='*70}")
+    logger.info(f"\nTotal papers: {len(results['papers'])}")
+    logger.info(f"Total atomic facts: {len(atomic_facts)}")
+    logger.info(f"Search time: {results['search_time_ms']:.0f}ms")
+    logger.info(f"Note: {results['note']}")
     
     # Print system status
-    print(f"\n{'='*70}")
-    print("System Status: READY")
-    print(f"{'='*70}")
-    print("✓ Qdrant client initialized")
-    print("✓ Embedding models loaded (SapBERT + multilingual-e5)")
-    print("✓ Medical papers collection: medical_papers")
-    print("✓ Atomic facts collection: atomic_facts")
-    print("✓ Real vector similarity search (not using mock data)")
-    print("✓ Multi-stage retrieval: Vector search → Manual similarity")
-    print("✓ Named vectors: 4 per paper (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)")
-    print("✓ Named vectors: 1 per atomic fact (sapbert_fact)")
-    print("✓ Total papers: 298 (all 3 domains)")
-    print("✓ Total atomic facts: ~3,088")
-    print("✓ Total embedding vectors: 4,276")
-    print("\nNext Steps:")
-    print("  1. Run medgemma_query.py for direct and RAG-enhanced queries")
-    print("  2. Create full integration script (search + MedGemma)")
-    print("  3. Deploy complete clinical evidence agent")
-    print(f"{'='*70}")
+    logger.info(f"\n{'='*70}")
+    logger.info("System Status: READY")
+    logger.info(f"{'='*70}")
+    logger.info("✓ Qdrant client initialized")
+    logger.info("✓ Embedding models loaded (SapBERT + multilingual-e5)")
+    logger.info("✓ Medical papers collection: medical_papers")
+    logger.info("✓ Atomic facts collection: atomic_facts")
+    logger.info("✓ Real vector similarity search (not using mock data)")
+    logger.info("✓ Multi-stage retrieval: Vector search → Manual similarity")
+    logger.info("✓ Named vectors: 4 per paper (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)")
+    logger.info("✓ Named vectors: 1 per atomic fact (sapbert_fact)")
+    logger.info("✓ Total papers: 298 (all 3 domains)")
+    logger.info("✓ Total atomic facts: ~3,088")
+    logger.info("✓ Total embedding vectors: 4,276")
+    logger.info("\nNext Steps:")
+    logger.info("  1. Run medgemma_query.py for direct and RAG-enhanced queries")
+    logger.info("  2. Create full integration script (search + MedGemma)")
+    logger.info("  3. Deploy complete clinical evidence agent")
+    logger.info(f"{'='*70}")
 
 
 if __name__ == '__main__':

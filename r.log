@@ -1,0 +1,108 @@
+======================================================================
+Medical Paper Search
+======================================================================
+Query: what is the treatment for osteoarthritis
+
+Language detected: en
+
+Generating query embedding...
+  Generated 1024-dim vector
+
+Searching medical_papers using e5_questions_en...
+  Fetching all points from medical_papers...
+  ✓ Fetched 115 points from medical_papers
+  Using e5_questions_en vectors (1024-dim)
+  ✓ Found 5 results by similarity
+
+======================================================================
+Search Results
+======================================================================
+Query: what is the treatment for osteoarthritis
+Language: en
+Strategy: vector_similarity
+
+Top Papers:
+
+1. PMID: PMID_41039116 (score: 0.884)
+   JSON: data/obesity/pharmacologic/guidelines_and_reviews/papers/PMID_41039116.json
+   Title: A systematic review and meta-analysis of the efficacy and safety of pharmacological treatments for obesity in adults.
+   PICO:
+     Patient: Adults with obesity/overweight, including those with class II (BMI 35–39.9 kg/m²) and class III obesity (BMI ≥40.0 kg/m²). Limited data for BMI <30 kg/m².
+     Intervention: Orlistat (360 mg), semaglutide (2.4 mg), liraglutide (3.0 mg), tirzepatide (10–15 mg), naltrexone/bupropion (32/360 mg), phentermine/topiramate (15/92 mg) for ≥48 weeks.
+     Outcome: Percentage of total body weight loss (TBWL%) at the end of the study. All OMMs showed significantly greater TBWL% versus placebo (P < 0.0001). Semaglutide and tirzepatide achieved >10% TBWL.
+
+2. PMID: PMID_40789597 (score: 0.880)
+   JSON: data/obesity/pharmacologic/guidelines_and_reviews/papers/PMID_40789597.json
+   Title: Pharmacotherapy for obesity management in adults: 2025 clinical practice guideline update.
+   PICO:
+     Patient: Adults (≥18 years) with obesity (BMI ≥ 30 kg/m² or BMI ≥ 27 kg/m² with adiposity-related complications). Specific subpopulations include those with established atherosclerotic cardiovascular disease (ASCVD), heart failure with preserved ejection fraction (HFpEF), metabolic dysfunction-associated steatohepatitis (MASH), prediabetes, type 2 diabetes, obstructive sleep apnea (OSA), knee osteoarthritis (OA), and rare monogenic causes of obesity (Bardet–Biedl syndrome, POMC, PCSK1, or LEPR deficiency).
+     Intervention: Pharmacotherapy for obesity management, including Semaglutide 2.4 mg weekly, Tirzepatide (5, 10, 15 mg weekly), Liraglutide 3 mg daily, Naltrexone–bupropion 16 mg/180 mg twice daily, Orlistat 120 mg 3 times daily, and Setmelanotide up to 3 mg daily. Used in conjunction with health behavior changes (medical nutrition therapy, physical activity).
+     Outcome: Clinically meaningful weight loss and improvements in obesity-related health complications. Specific outcomes include reduction in major adverse cardiovascular events, improvement in HF symptoms, reduction in progression to type 2 diabetes or achievement of normoglycemia, improved glycemic control, MASH resolution/fibrosis improvement, improved apnea-hypopnea index, and reduced knee pain. Quantitative results for weight change are provided for specific medications.
+
+3. PMID: PMID_39968298 (score: 0.875)
+   JSON: data/obesity/pharmacologic/guidelines_and_reviews/papers/PMID_39968298.json
+   Title: Comparative efficacy of incretin drugs on glycemic control, body weight, and blood pressure in adults with overweight or obesity and with/without type 2 diabetes: a systematic review and network meta-analysis.
+   PICO:
+     Patient: Adults with overweight or obesity, with or without type 2 diabetes.
+     Intervention: Multi-receptor drugs (Retatrutide, Tirzepatide, Survodutide, Mazdutide, Efinopegdutide, AMG 133) for at least 12 weeks.
+     Outcome: Weight reduction (MD: -11.91 kg to -12.78 kg for Retatrutide and Tirzepatide vs placebo), HbA1c reduction (MD: -1.89% for Mazdutide, -1.87% for Tirzepatide in patients with diabetes), FPG reduction (MD: -2.45 mmol/L for Tirzepatide in patients with diabetes), Systolic Blood Pressure reduction (MD: -6.69 mmHg for Tirzepatide), Diastolic Blood Pressure reduction (MD: -3.73 mmHg for Tirzepatide).
+
+4. PMID: PMID_39305981 (score: 0.870)
+   JSON: data/obesity/pharmacologic/novel_agents/papers/PMID_39305981.json
+   Title: Seven glucagon-like peptide-1 receptor agonists and polyagonists for weight loss in patients with obesity or overweight: an updated systematic review and network meta-analysis of randomized controlled trials.
+   PICO:
+     Patient: Patients with obesity or overweight. Patients without type 2 diabetes mellitus (T2DM) and patients with type 2 diabetes mellitus (T2DM) were considered. Patients with high body mass index (BMI) and patients with low BMI were considered. Patients undergoing longer treatment cycles and patients undergoing shorter treatment cycles were considered.
+     Intervention: Seven GLP-1 receptor agonists and polyagonists: mazdutide (6 or 4.5 mg), retatrutide (12 or 8 mg), tirzepatide (15 or 10 mg), liraglutide (3.0 mg), semaglutide (2.4 mg), orforglipron (45 or 36 mg), and beinaglutide (0.2 mg). Intervention duration of at least 16 weeks.
+     Outcome: Percentage change in body weight from baseline. Retatrutide 12 mg: -22.10% (CI not provided, p-value not provided). Retatrutide 8 mg: -20.70% (CI not provided, p-value not provided). Tirzepatide 15 mg: -16.53% (CI not provided, p-value not provided). Changes in waist circumference, hemoglobin A1c, and fasting plasma glucose level from baseline; adverse events, serious adverse events, adverse event withdrawal, and hypoglycemic events.
+
+5. PMID: PMID_39455729 (score: 0.868)
+   JSON: data/obesity/pharmacologic/glp1_receptor_agonists/papers/PMID_39455729.json
+   Title: Semaglutide in patients with overweight or obesity and chronic kidney disease without diabetes: a randomized double-blind placebo-controlled clinical trial.
+   PICO:
+     Patient: Adults with chronic kidney disease (CKD) with estimated glomerular filtration rate (eGFR) ≥25 ml/min/1.73 m², overweight or obesity, and without diabetes.
+     Intervention: Semaglutide (dosage and duration not specified in abstract).
+     Outcome: Reduction in albuminuria and risk of kidney disease progression (specific quantitative results, confidence intervals, and p-values not provided in abstract).
+
+======================================================================
+Atomic Facts:
+Searching atomic_facts...
+  Generated 768-dim SapBERT query vector
+  ✓ Fetched 1000 atomic facts
+  Using sapbert_fact vectors (768-dim)
+  ✓ Found 5 atomic facts
+1. [PMID_40789597] Obesity pharmacotherapy should be used alongside health behavior changes and personalized to individual values, preferences, and goals. (score: 0.522)
+   JSON: data/obesity/pharmacologic/guidelines_and_reviews/papers/PMID_40789597.json
+2. [PMID_39476339] The mean baseline Western Ontario and McMaster Universities Osteoarthritis Index (WOMAC) pain score was 70.9. (score: 0.503)
+   JSON: data/obesity/pharmacologic/glp1_receptor_agonists/papers/PMID_39476339.json
+3. [PMID_39632534] Ongoing trials will provide further data on long-term safety and efficacy. (score: 0.493)
+   JSON: data/obesity/pharmacologic/novel_agents/papers/PMID_39632534.json
+
+======================================================================
+Search Complete
+======================================================================
+
+Total papers: 5
+Total atomic facts: 5
+Search time: 375ms
+Note: Real Qdrant search with e5_questions_en (1024-dim)
+
+======================================================================
+System Status: READY
+======================================================================
+✓ Qdrant client initialized
+✓ Embedding models loaded (SapBERT + multilingual-e5)
+✓ Medical papers collection: medical_papers
+✓ Atomic facts collection: atomic_facts
+✓ Real vector similarity search (not using mock data)
+✓ Multi-stage retrieval: Vector search → Manual similarity
+✓ Named vectors: 4 per paper (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
+✓ Named vectors: 1 per atomic fact (sapbert_fact)
+✓ Total papers: 298 (all 3 domains)
+✓ Total atomic facts: ~3,088
+✓ Total embedding vectors: 4,276
+
+Next Steps:
+  1. Run medgemma_query.py for direct and RAG-enhanced queries
+  2. Create full integration script (search + MedGemma)
+  3. Deploy complete clinical evidence agent
+======================================================================

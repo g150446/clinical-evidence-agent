@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clinical Evidence Agent</title>
+<style>
+/* ── Reset & Base ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #0f1117;
+  --surface: #1a1d27;
+  --card:    #21253a;
+  --border:  #2e3350;
+  --accent:  #4f8ef7;
+  --accent2: #38c9a4;
+  --warn:    #f7c94f;
+  --err:     #f75c5c;
+  --text:    #e2e6f0;
+  --muted:   #7c85a6;
+  --radius:  10px;
+  font-size: 15px;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+header h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  color: var(--accent);
+}
+header span.sub { color: var(--muted); font-size: .85rem; margin-left: auto; }
+
+/* ── Status bar ──────────────────────────────────────────────────────── */
+#status-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 24px;
+  display: flex;
+  gap: 20px;
+  font-size: .8rem;
+  color: var(--muted);
+}
+.status-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.status-dot.ok  { background: var(--accent2); }
+.status-dot.err { background: var(--err); }
+
+/* ── Main layout ─────────────────────────────────────────────────────── */
+main {
+  flex: 1;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Query card ──────────────────────────────────────────────────────── */
+.query-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.query-card label {
+  display: block;
+  font-size: .8rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+textarea#query-input {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: .95rem;
+  resize: vertical;
+  min-height: 72px;
+  outline: none;
+  transition: border-color .2s;
+  font-family: inherit;
+}
+textarea#query-input:focus { border-color: var(--accent); }
+
+.controls {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mode-group { display: flex; gap: 6px; }
+.mode-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  font-size: .82rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.mode-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+
+#run-btn {
+  margin-left: auto;
+  padding: 8px 22px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-weight: 700;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+#run-btn:disabled { opacity: .4; cursor: not-allowed; }
+#run-btn:hover:not(:disabled) { opacity: .85; }
+
+/* ── Progress ────────────────────────────────────────────────────────── */
+#progress-msg {
+  font-size: .82rem;
+  color: var(--warn);
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+.spinner {
+  width: 12px; height: 12px;
+  border: 2px solid var(--warn);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Context panel (RAG) ─────────────────────────────────────────────── */
+#context-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: none;
+}
+.panel-header {
+  background: var(--card);
+  padding: 10px 16px;
+  font-size: .82rem;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.panel-header:hover { color: var(--text); }
+.panel-body { padding: 14px 16px; display: none; }
+.panel-body.open { display: block; }
+
+.paper-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .83rem;
+}
+.paper-item:last-child { border-bottom: none; }
+.paper-title { color: var(--text); font-weight: 600; }
+.paper-meta  { color: var(--muted); margin-top: 2px; }
+.paper-score {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: .72rem;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+}
+
+.fact-list { list-style: none; margin-top: 4px; }
+.fact-list li {
+  padding: 4px 0;
+  font-size: .82rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.fact-list li::before { content: "•"; color: var(--accent2); margin-right: 6px; }
+
+/* ── Response area ───────────────────────────────────────────────────── */
+.response-grid {
+  display: grid;
+  gap: 16px;
+}
+.response-grid.split { grid-template-columns: 1fr 1fr; }
+@media (max-width: 700px) { .response-grid.split { grid-template-columns: 1fr; } }
+
+.response-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: none;
+}
+.response-card .card-header {
+  background: var(--card);
+  padding: 9px 16px;
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+}
+.response-card.rag   .card-header { border-left: 3px solid var(--accent2); color: var(--accent2); }
+.response-card.direct .card-header { border-left: 3px solid var(--accent); color: var(--accent); }
+.response-card.single .card-header { border-left: 3px solid var(--accent); color: var(--accent); }
+
+.response-body {
+  padding: 16px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: .88rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 60px;
+  color: var(--text);
+}
+.cursor {
+  display: inline-block;
+  width: 8px; height: 1em;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink .8s step-end infinite;
+  margin-left: 1px;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Error box ───────────────────────────────────────────────────────── */
+#error-box {
+  background: rgba(247,92,92,.1);
+  border: 1px solid var(--err);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  color: var(--err);
+  font-size: .88rem;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+    <circle cx="13" cy="13" r="12" stroke="#4f8ef7" stroke-width="1.5"/>
+    <path d="M13 7v6l4 2" stroke="#38c9a4" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M8 13h2m6 0h2M13 8v2m0 6v2" stroke="#4f8ef7" stroke-width="1.4" stroke-linecap="round"/>
+  </svg>
+  <h1>Clinical Evidence Agent</h1>
+  <span class="sub">MedGemma + Qdrant RAG</span>
+</header>
+
+<!-- Status bar -->
+<div id="status-bar">
+  <span><span class="status-dot" id="dot-ollama"></span>Ollama <span id="lbl-ollama">確認中...</span></span>
+  <span><span class="status-dot" id="dot-qdrant"></span>Qdrant <span id="lbl-qdrant">確認中...</span></span>
+</div>
+
+<main>
+
+  <!-- Query card -->
+  <div class="query-card">
+    <label for="query-input">医療クエリ</label>
+    <textarea id="query-input" rows="3"
+      placeholder="例: What is the effect of semaglutide 2.4mg on weight loss in adults with obesity?"></textarea>
+    <div class="controls">
+      <div class="mode-group">
+        <button class="mode-btn active" data-mode="direct">Direct</button>
+        <button class="mode-btn" data-mode="rag">RAG</button>
+        <button class="mode-btn" data-mode="compare">Compare</button>
+      </div>
+      <div id="progress-msg">
+        <div class="spinner"></div>
+        <span id="progress-text">処理中...</span>
+      </div>
+      <button id="run-btn">実行</button>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-box"></div>
+
+  <!-- Context panel (RAG / compare) -->
+  <div id="context-panel">
+    <div class="panel-header" id="ctx-toggle">
+      <span>検索コンテキスト</span>
+      <span id="ctx-arrow">▶</span>
+    </div>
+    <div class="panel-body" id="ctx-body">
+      <div id="ctx-papers"></div>
+      <div id="ctx-facts-wrap" style="margin-top:12px">
+        <div style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Atomic Facts</div>
+        <ul class="fact-list" id="ctx-facts"></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Response cards -->
+  <div class="response-grid" id="response-grid">
+    <!-- compare: RAG side -->
+    <div class="response-card rag" id="card-rag">
+      <div class="card-header">RAG 回答（Qdrant 検索付き）</div>
+      <div class="response-body" id="body-rag"></div>
+    </div>
+    <!-- compare: direct side -->
+    <div class="response-card direct" id="card-direct">
+      <div class="card-header">Direct 回答（検索なし）</div>
+      <div class="response-body" id="body-direct"></div>
+    </div>
+    <!-- single mode -->
+    <div class="response-card single" id="card-single">
+      <div class="card-header" id="card-single-title">回答</div>
+      <div class="response-body" id="body-single"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const esc = s  => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── Status ────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+
+    const setDot = (id, ok, label) => {
+      $(`dot-${id}`).className = `status-dot ${ok ? 'ok' : 'err'}`;
+      $(`lbl-${id}`).textContent = label;
+    };
+
+    if (d.ollama) {
+      const ok = d.ollama.ok;
+      const models = ok ? d.ollama.models.join(', ') || 'モデルなし' : d.ollama.error;
+      setDot('ollama', ok, ok ? `OK (${models})` : `エラー: ${models}`);
+    }
+    if (d.qdrant) {
+      const ok = d.qdrant.ok;
+      const info = ok ? d.qdrant.collections.join(', ') : d.qdrant.error;
+      setDot('qdrant', ok, ok ? `OK [${info}]` : `エラー: ${info}`);
+    }
+  } catch(e) {
+    console.error('status check failed', e);
+  }
+}
+loadStatus();
+
+// ── Mode selector ─────────────────────────────────────────────────────────
+let currentMode = 'direct';
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+  });
+});
+
+// ── Context panel toggle ─────────────────────────────────────────────────
+$('ctx-toggle').addEventListener('click', () => {
+  const body  = $('ctx-body');
+  const arrow = $('ctx-arrow');
+  const open  = body.classList.toggle('open');
+  arrow.textContent = open ? '▼' : '▶';
+});
+
+// ── UI state helpers ──────────────────────────────────────────────────────
+function setProgress(visible, msg) {
+  const el = $('progress-msg');
+  el.style.display = visible ? 'flex' : 'none';
+  if (msg) $('progress-text').textContent = msg;
+}
+
+function removeCursor(el) {
+  const c = el.querySelector('.cursor');
+  if (c) c.remove();
+}
+
+function appendToken(bodyEl, token) {
+  removeCursor(bodyEl);
+  bodyEl.insertAdjacentText('beforeend', token);
+  const cur = document.createElement('span');
+  cur.className = 'cursor';
+  bodyEl.appendChild(cur);
+}
+
+function showError(msg) {
+  const el = $('error-box');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideError() { $('error-box').style.display = 'none'; }
+
+function resetUI() {
+  hideError();
+  // hide all cards and context
+  ['card-rag','card-direct','card-single','context-panel'].forEach(id => {
+    $(id).style.display = 'none';
+  });
+  ['body-rag','body-direct','body-single'].forEach(id => {
+    $(id).textContent = '';
+  });
+  $('ctx-papers').innerHTML = '';
+  $('ctx-facts').innerHTML = '';
+  $('ctx-body').classList.remove('open');
+  $('ctx-arrow').textContent = '▶';
+}
+
+function renderContext(ctx) {
+  // papers
+  const papersEl = $('ctx-papers');
+  if (ctx.papers && ctx.papers.length > 0) {
+    papersEl.innerHTML = `<div style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">関連論文 (Top ${ctx.papers.length})</div>`;
+    ctx.papers.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'paper-item';
+      div.innerHTML = `
+        <div class="paper-title">${esc(p.title || '(タイトル不明)')}
+          <span class="paper-score">${p.score}</span>
+        </div>
+        <div class="paper-meta">PMID: ${esc(p.paper_id)} · ${esc(p.journal || '')} ${esc(String(p.year || ''))}</div>`;
+      papersEl.appendChild(div);
+    });
+  }
+  // facts
+  const factsEl = $('ctx-facts');
+  if (ctx.facts && ctx.facts.length > 0) {
+    ctx.facts.forEach(f => {
+      const li = document.createElement('li');
+      li.textContent = f;
+      factsEl.appendChild(li);
+    });
+    $('ctx-facts-wrap').style.display = '';
+  } else {
+    $('ctx-facts-wrap').style.display = 'none';
+  }
+  $('context-panel').style.display = 'block';
+  // auto-open
+  $('ctx-body').classList.add('open');
+  $('ctx-arrow').textContent = '▼';
+}
+
+// ── Run query ─────────────────────────────────────────────────────────────
+$('run-btn').addEventListener('click', runQuery);
+$('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runQuery();
+});
+
+async function runQuery() {
+  const queryText = $('query-input').value.trim();
+  if (!queryText) { showError('クエリを入力してください'); return; }
+
+  const btn = $('run-btn');
+  btn.disabled = true;
+  resetUI();
+  setProgress(true, '接続中...');
+
+  const mode = currentMode;
+
+  // Show appropriate cards
+  const grid = $('response-grid');
+  if (mode === 'compare') {
+    grid.classList.add('split');
+    $('card-rag').style.display = 'block';
+    $('card-direct').style.display = 'block';
+    $('card-single').style.display = 'none';
+  } else {
+    grid.classList.remove('split');
+    $('card-rag').style.display = 'none';
+    $('card-direct').style.display = 'none';
+    $('card-single-title').textContent = mode === 'rag' ? 'RAG 回答（Qdrant 検索付き）' : 'Direct 回答';
+    $('card-single').className = `response-card ${mode === 'rag' ? 'rag' : 'direct'}`;
+    $('card-single').style.display = 'block';
+  }
+
+  try {
+    const resp = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: queryText, mode }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      showError(err.error || 'サーバーエラー');
+      btn.disabled = false;
+      setProgress(false);
+      return;
+    }
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();  // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+
+        let evt;
+        try { evt = JSON.parse(raw); } catch { continue; }
+
+        switch (evt.type) {
+          case 'progress':
+            setProgress(true, evt.message);
+            break;
+
+          case 'context':
+            renderContext(evt.context);
+            break;
+
+          case 'token':
+            setProgress(false);
+            appendToken($('body-single'), evt.token);
+            break;
+
+          case 'rag_token':
+            setProgress(false);
+            appendToken($('body-rag'), evt.token);
+            break;
+
+          case 'direct_token':
+            setProgress(true, '直接回答生成中...');
+            appendToken($('body-direct'), evt.token);
+            break;
+
+          case 'done':
+            setProgress(false);
+            // remove all cursors
+            document.querySelectorAll('.cursor').forEach(c => c.remove());
+            break;
+
+          case 'error':
+            setProgress(false);
+            showError(evt.message);
+            break;
+        }
+      }
+    }
+  } catch(e) {
+    showError(`通信エラー: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    setProgress(false);
+    document.querySelectorAll('.cursor').forEach(c => c.remove());
+  }
+}
+</script>
+</body>
+</html>
