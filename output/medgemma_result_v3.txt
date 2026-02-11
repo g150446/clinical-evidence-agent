@@ -1,0 +1,188 @@
+No sentence-transformers model found with name cambridgeltl/SapBERT-from-PubMedBERT-fulltext. Creating a new one with mean pooling.
+Initializing Qdrant client...
+✓ Qdrant client initialized
+Loading embedding models...
+✓ SapBERT loaded
+✓ multilingual-e5 loaded
+✓ All models loaded
+
+0. 日本語クエリを英語に翻訳...
+   ✓ 翻訳完了: glp1受容体作動薬は変形性膝関節症に有効ですか?
+   → 英語: The question is "glp1受容体作動薬は変形性膝関節症に有効ですか?" which translates to "Are GLP-1 receptor agonists effective for osteoarthritis?"
+
+The English translation is: "Are GLP-1 receptor agonists effective for osteoarthritis?"
+1. Qdrant検索実行...
+   ✓ 言語検出: ja
+   ✓ 検索クエリ: The question is "glp1受容体作動薬は変形性膝関節症に有効ですか?" which translates to "Are GLP-1 receptor agonists effective for osteoarthritis?"
+
+The English translation is: "Are GLP-1 receptor agonists effective for osteoarthritis?"
+   ✓ 論文数: 5
+2. Atomic Facts検索実行...
+   ✓ アトミックファクト数: 5
+3. MedGemma生成実行...
+
+検索された論文詳細:
+
+論文 1:
+  PMID: PMID_39476339
+  Title: Once-Weekly Semaglutide in Persons with Obesity and Knee Osteoarthritis.
+  Journal: The New England journal of medicine (2024)
+  Score: 0.9688497221373215
+  PICO Patient: Adults with obesity (BMI ≥30) and a clinical and radiologic diagnosis of moderate knee osteoarthritis with at least moderate pain. Mean age 56 years, mean BMI 40.3, mean WOMAC pain score 70.9. 81.6% women.
+  PICO Intervention: Once-weekly subcutaneous semaglutide (2.4 mg) in addition to counseling on physical activity and a reduced-calorie diet for 68 weeks.
+  PICO Outcome: Percentage change in body weight from baseline to week 68: -13.7% with semaglutide vs. -3.2% with placebo (P<0.001). Change in WOMAC pain score from baseline to week 68: -41.7 points with semaglutide vs. -27.5 points with placebo (P<0.001). Change in SF-36 physical-function score: 12.0 points with semaglutide vs. 6.5 points with placebo (P<0.001).
+
+論文 2:
+  PMID: PMID_40499738
+  Title: Glucagon-Like Peptide-1 Receptor Agonists and Gastrointestinal Adverse Events: A Systematic Review and Meta-Analysis.
+  Journal: Gastroenterology (2025)
+  Score: 0.8781214383873486
+  PICO Patient: Patients with type 2 diabetes mellitus, overweight/obesity, or metabolic dysfunction-associated steatohepatitis/metabolic dysfunction-associated steatotic liver disease.
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs). Specific dosing, duration, and formulation details were evaluated in subgroup analyses but not specified for the overall meta-analysis.
+  PICO Outcome: Increased risk of cholelithiasis (Risk Ratio [RR], 1.46; 95% CI, 1.09-1.97; 2 more cases per 1000) and probable increased risk of GERD (RR, 2.19; 95% CI, 1.48-3.25; 4 more cases per 1000) compared with placebo.
+
+論文 3:
+  PMID: PMID_38017205
+  Title: Semaglutide and Tirzepatide reduce alcohol consumption in individuals with obesity.
+  Journal: Scientific reports (2023)
+  Score: 0.8711245183186099
+  PICO Patient: Individuals with obesity (BMI >= 30) who are current alcohol drinkers. Study 1: n=1580 alcohol-related posts from 962 individuals. Study 2: n=153 participants (47 controls, 56 on Semaglutide, 50 on Tirzepatide).
+  PICO Intervention: Study 1: Analysis of ~68,250 Reddit posts related to GLP-1 or GLP-1/GIP agonists. Study 2: Participants took Semaglutide (GLP-1 agonist) or Tirzepatide (GLP-1/GIP combination) for >= 30 days.
+  PICO Outcome: Reduced alcohol consumption, measured by self-reported intake, drinks per drinking episode, binge drinking odds, AUDIT scores, and subjective effects of alcohol. Study 1: 71.7% (1134/1580) of alcohol-related posts indicated reduced alcohol cravings, usage, or negative effects. Study 2: Significant reductions observed in medication groups compared to baseline and control for drinks per drinking episode (Time effect: B=2.34, SE=0.27, p<0.001; Semaglutide vs Control: B=-2.47, SE=0.54, p<0.001; Tirzepatide vs Control: B=-2.84, SE=0.55, p<0.001), binge drinking odds (Semaglutide vs. Control: B=-2.05, SE=0.60, p<0.001; Tirzepatide vs. Control: B=-3.79, SE=0.68, p<0.001), and AUDIT scores (Time effect: B=6.63, SE=0.77, p<0.001; Semaglutide vs Control: B=-5.08, SE=1.31, p=0.001; Tirzepatide vs Control: B=-6.69, SE=1.33, p<0.001).
+
+論文 4:
+  PMID: PMID_39305981
+  Title: Seven glucagon-like peptide-1 receptor agonists and polyagonists for weight loss in patients with obesity or overweight: an updated systematic review and network meta-analysis of randomized controlled trials.
+  Journal: Metabolism: clinical and experimental (2024)
+  Score: 0.8674767951134608
+  PICO Patient: Patients with obesity or overweight. Patients without type 2 diabetes mellitus (T2DM) and patients with type 2 diabetes mellitus (T2DM). Patients with high body mass index (BMI) and patients with low BMI.
+  PICO Intervention: Seven GLP-1 receptor agonists and polyagonists: mazdutide (6 or 4.5 mg), retatrutide (12 or 8 mg), tirzepatide (15 or 10 mg), liraglutide (3.0 mg), semaglutide (2.4 mg), orforglipron (45 or 36 mg), and beinaglutide (0.2 mg). Intervention duration of at least 16 weeks.
+  PICO Outcome: Percentage change in body weight from baseline. Retatrutide 12 mg: -22.10% (CI not provided, p-value not provided). Retatrutide 8 mg: -20.70% (CI not provided, p-value not provided). Tirzepatide 15 mg: -16.53% (CI not provided, p-value not provided).
+
+論文 5:
+  PMID: PMID_40196933
+  Title: Real-world evidence on the utilization, clinical and comparative effectiveness, and adverse effects of newer GLP-1RA-based weight-loss therapies.
+  Journal: Diabetes, obesity & metabolism (2025)
+  Score: 0.8672193998638001
+  PICO Patient: Populations with obesity, including those with type 2 diabetes.
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs) including liraglutide, semaglutide, and tirzepatide, often at lower doses than evaluated in clinical trials.
+  PICO Outcome: Weight reduction, adherence, discontinuation rates, and adverse effects (gastrointestinal disturbances, pancreatitis, pancreatic cancer, thyroid disorders, depression, self-harm, eye disease).
+
+アトミックファクト (5 件):
+  2. Glucagon-like peptide-1 receptor agonists (GLP-1RAs) were assessed in patients with type 2 diabetes mellitus, overweight/obesity, or metabolic dysfunction-associated steatohepatitis/metabolic dysfunction-associated steatotic liver disease.
+  3. GLP-1RAs probably increased the risk of gastroesophageal reflux disease (GERD) compared to placebo (RR, 2.19; 95% CI, 1.48-3.25).
+  4. GLP-1RAs increased the risk of cholelithiasis compared to placebo (RR, 1.46; 95% CI, 1.09-1.97).
+  5. Subgroup analyses indicated that increased risks of cholelithiasis and GERD were more pronounced with weight-loss-inducing GLP-1RAs.
+  6. GLP-1RAs likely have little or no effect on the risk of other gastrointestinal or biliary events.
+
+======================================================================
+✓ Mode: qdrant_augmented
+✓ Query: glp1受容体作動薬は変形性膝関節症に有効ですか?
+✓ Time: 119411.3ms
+
+Answer:
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+glp1受容体作動薬は変
+======================================================================
+Exception ignored in: <function QdrantClient.__del__ at 0x10af0b4c0>
+Traceback (most recent call last):
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+ImportError: sys.meta_path is None, Python is likely shutting down

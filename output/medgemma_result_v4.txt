@@ -1,0 +1,82 @@
+No sentence-transformers model found with name cambridgeltl/SapBERT-from-PubMedBERT-fulltext. Creating a new one with mean pooling.
+Initializing Qdrant client...
+✓ Qdrant client initialized
+Loading embedding models...
+✓ SapBERT loaded
+✓ multilingual-e5 loaded
+✓ All models loaded
+
+0. 日本語クエリを英語に翻訳...
+   ✓ 翻訳完了: glp1受容体作動薬は変形性膝関節症に有効ですか?
+   → 英語: Are GLP-1 receptor agonists effective for osteoarthritis?
+1. Qdrant検索実行...
+   ✓ 言語検出: ja
+   ✓ 検索クエリ: Are GLP-1 receptor agonists effective for osteoarthritis?
+   ✓ 論文数: 5
+2. Atomic Facts検索実行...
+   ✓ アトミックファクト数: 5
+3. MedGemma生成実行...
+
+検索された論文詳細:
+
+論文 1:
+  PMID: PMID_39476339
+  Title: Once-Weekly Semaglutide in Persons with Obesity and Knee Osteoarthritis.
+  Journal: The New England journal of medicine (2024)
+  Score: 0.9499771860633338
+  PICO Patient: Adults with obesity (BMI ≥30) and a clinical and radiologic diagnosis of moderate knee osteoarthritis with at least moderate pain. Mean age 56 years, mean BMI 40.3, mean WOMAC pain score 70.9. 81.6% women.
+  PICO Intervention: Once-weekly subcutaneous semaglutide (2.4 mg) in addition to counseling on physical activity and a reduced-calorie diet for 68 weeks.
+  PICO Outcome: Percentage change in body weight from baseline to week 68: -13.7% with semaglutide vs. -3.2% with placebo (P<0.001). Change in WOMAC pain score from baseline to week 68: -41.7 points with semaglutide vs. -27.5 points with placebo (P<0.001). Change in SF-36 physical-function score: 12.0 points with semaglutide vs. 6.5 points with placebo (P<0.001).
+
+論文 2:
+  PMID: PMID_41090431
+  Title: Retatrutide for the treatment of obesity, obstructive sleep apnea and knee osteoarthritis: Rationale and design of the TRIUMPH registrational clinical trials.
+  Journal: Diabetes, obesity & metabolism (2026)
+  Score: 0.9467549931603424
+  PICO Patient: Adults with obesity (BMI ≥27 kg/m² with at least one obesity complication, or BMI ≥35 kg/m²), including those with Type 2 Diabetes (T2D), established cardiovascular disease (CVD), moderate-to-severe obstructive sleep apnea (OSA), and/or knee osteoarthritis (OA). Female participation capped at ~70%.
+  PICO Intervention: Retatrutide 4, 9, or 12 mg once weekly (QW) subcutaneously, or placebo, for 80 weeks (TRIUMPH-1, -2, -3) or 68 weeks (TRIUMPH-4), following a 16-week dose escalation period. All participants received lifestyle counseling (healthy diet, ≥150 min/week physical activity).
+  PICO Outcome: Primary endpoints include percent change in body weight from baseline to Week 80 (TRIUMPH-1, -2, -3), change in Apnea-Hypopnea Index (AHI) from baseline to Week 80 (OSA baskets), and change in the Western Ontario and McMaster Universities Osteoarthritis Index (WOMAC) pain subscale score from baseline to Week 68 (TRIUMPH-4) or Week 80 (OA basket). Type I error controlled at α=0.05, split between overarching weight management and each basket trial.
+
+論文 3:
+  PMID: PMID_38843460
+  Title: Efficacy and Safety of GLP-1 Medicines for Type 2 Diabetes and Obesity.
+  Journal: Diabetes care (2024)
+  Score: 0.9028617012823631
+  PICO Patient: Patients with type 2 diabetes and obesity, and select patient populations with cardiorenal benefits, metabolic liver disease, peripheral artery disease, Parkinson disease, and Alzheimer disease.
+  PICO Intervention: Glucagon-like peptide 1 receptor agonists (GLP-1RA), tirzepatide (GIP-GLP-1 receptor coagonist), maritide (GIP antagonist, GLP-1 receptor agonist), retatrutide (glucagon and GLP-1 receptor agonist), survodutide (glucagon and GLP-1 receptor agonist).
+  PICO Outcome: Cardiorenal benefits, efficacy for new indications (metabolic liver disease, peripheral artery disease, Parkinson disease, Alzheimer disease), safety (muscle strength, bone density and fractures, exercise capacity, gastrointestinal motility, retained gastric contents and anesthesia, pancreatic and biliary tract disorders, risk of cancer).
+
+論文 4:
+  PMID: PMID_40499738
+  Title: Glucagon-Like Peptide-1 Receptor Agonists and Gastrointestinal Adverse Events: A Systematic Review and Meta-Analysis.
+  Journal: Gastroenterology (2025)
+  Score: 0.9017696156693662
+  PICO Patient: Patients with type 2 diabetes mellitus, overweight/obesity, or metabolic dysfunction-associated steatohepatitis/metabolic dysfunction-associated steatotic liver disease.
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs). Specific dosing, duration, and formulation details were evaluated in subgroup analyses but not specified for the overall meta-analysis.
+  PICO Outcome: Increased risk of cholelithiasis (Risk Ratio [RR], 1.46; 95% CI, 1.09-1.97; 2 more cases per 1000) and probable increased risk of GERD (RR, 2.19; 95% CI, 1.48-3.25; 4 more cases per 1000) compared with placebo.
+
+論文 5:
+  PMID: PMID_40196933
+  Title: Real-world evidence on the utilization, clinical and comparative effectiveness, and adverse effects of newer GLP-1RA-based weight-loss therapies.
+  Journal: Diabetes, obesity & metabolism (2025)
+  Score: 0.9005868408726982
+  PICO Patient: Populations with obesity, including those with type 2 diabetes.
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs) including liraglutide, semaglutide, and tirzepatide, often at lower doses than evaluated in clinical trials.
+  PICO Outcome: Weight reduction, adherence, discontinuation rates, and adverse effects (gastrointestinal disturbances, pancreatitis, pancreatic cancer, thyroid disorders, depression, self-harm, eye disease).
+
+アトミックファクト (5 件):
+  2. GLP-1 receptor agonists (GLP-1RA) have established cardiorenal benefits in select patient populations.
+  3. Ongoing trials are investigating the efficacy of GLP-1RA for peripheral artery disease.
+  4. Ongoing trials are investigating the efficacy of GLP-1RA for Alzheimer disease.
+  5. Maritide blocks the GIP and activates the GLP-1 receptor.
+  6. Safety data for GLP-1-based medicines focus on gastrointestinal motility.
+
+======================================================================
+✗ Error: Timeout after 120s
+======================================================================
+Exception ignored in: <function QdrantClient.__del__ at 0x1092a74c0>
+Traceback (most recent call last):
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+ImportError: sys.meta_path is None, Python is likely shutting down

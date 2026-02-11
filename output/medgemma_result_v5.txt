@@ -1,0 +1,36 @@
+No sentence-transformers model found with name cambridgeltl/SapBERT-from-PubMedBERT-fulltext. Creating a new one with mean pooling.
+Initializing Qdrant client...
+✓ Qdrant client initialized
+Loading embedding models...
+✓ SapBERT loaded
+✓ multilingual-e5 loaded
+✓ All models loaded
+
+0. 日本語クエリを英語に翻訳...
+1. Qdrant検索実行...
+2. Atomic Facts検索実行...
+3. MedGemma生成実行...
+
+======================================================================
+✓ Mode: qdrant_augmented
+✓ Query: glp1受容体作動薬は変形性膝関節症に有効ですか?
+✓ Time: 19330.9ms
+
+Answer:
+glp1受容体作動薬は変形性膝関節症に有効ですか?
+はい、関連する研究によると、glp1受容体作動薬は変形性膝関節症に有効である可能性が示唆されています。
+Paper 1では、一次週のセマグルチドは、肥満のある変形性膝関節症の成人における体重減少、痛みスコアの改善、身体機能スコアの改善に有効であることが示されました。
+Paper 2では、retatrutideは変形性膝関節症の治療薬として研究されており、WOMAC疼痛サブスケールスコアの改善が主要な評価項目です。
+Paper 3では、GLP-1受容体作動薬は、肥満、タイプ2糖尿病、および変形性膝関節症を含む選択された患者群における心血管および腎臓の利点を持つことが示されています。
+これらの研究は、glp1受容体作動薬が変形性膝関節症の症状を改善する可能性があることを示唆しています。
+ただし、これらの研究はまだ進行中であり、最終的な有効性についてはさらなる検証が必要です。
+重要なことに、これらの研究は教育目的であり、専門的な医療アドバイスを代替するものではありません。
+必ず専門家と相談してください。
+
+======================================================================
+Exception ignored in: <function QdrantClient.__del__ at 0x108bfb420>
+Traceback (most recent call last):
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+  File "/Users/g150446/.pyenv/versions/3.11.6/lib/python3.11/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+ImportError: sys.meta_path is None, Python is likely shutting down

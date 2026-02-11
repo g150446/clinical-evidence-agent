@@ -57,13 +57,103 @@ def setup_logging(log_file=None):
     return logger
 
 
-def search_by_vector_similarity(query_vec, collection_name, limit=10):
-    """Search by manual vector similarity
+def extract_keywords(query):
+    """Extract important keywords from English query for reranking
+    
+    Note: Japanese queries should be translated to English before calling this function.
+    See medgemma_query.py:translate_query_to_english()
+    
+    Args:
+        query: User query string (English)
+    
+    Returns:
+        List of important keywords
+    """
+    medical_keywords = [
+        'osteoarthritis', 'knee', 'hip', 'joint', 'arthritis',
+        'glp1', 'glp-1', 'glucagon', 'agonist', 'semaglutide',
+        'liraglutide', 'tirzepatide', 'metformin',
+        'diabetes', 'obesity', 'weight', 'loss',
+        'cardiovascular', 'heart', 'stroke', 'mi',
+        'efficacy', 'safety', 'treatment', 'therapy',
+        'effectiveness', 'clinical', 'trial',
+        'randomized', 'controlled', 'double-blind', 'placebo',
+        'parkinson', 'alzheimer', 'dementia', 'liver', 'nash'
+    ]
+    
+    query_lower = query.lower()
+    extracted = []
+    
+    for keyword in medical_keywords:
+        if keyword in query_lower:
+            extracted.append(keyword)
+    
+    words = query_lower.split()
+    for word in words:
+        word = word.strip('.,!?;:"\'-()[]{}')
+        if len(word) >= 4 and word not in extracted:
+            if any(med in word for med in ['osteo', 'arthr', 'cardio', 'diabet', 'obes']):
+                extracted.append(word)
+    
+    return list(set(extracted))
+
+
+def calculate_keyword_bonus(paper, keywords):
+    """Calculate bonus score based on keyword matching
+    
+    Note: Keywords should be English (Japanese queries should be translated first)
+    
+    Args:
+        paper: Paper dict with title, pico_en, metadata
+        keywords: List of English keywords to match
+    
+    Returns:
+        Bonus score to add to vector similarity
+    """
+    if not keywords:
+        return 0.0
+    
+    high_importance = ['osteoarthritis', 'knee', 'hip', 'joint', 'arthritis',
+                       'parkinson', 'alzheimer', 'dementia', 'liver', 'nash']
+    
+    medium_importance = ['cardiovascular', 'heart', 'stroke', 'diabetes', 
+                         'obesity', 'weight', 'metabolic']
+    
+    low_importance = ['glp1', 'glp-1', 'glucagon', 'agonist', 'semaglutide',
+                      'liraglutide', 'tirzepatide', 'treatment', 'therapy',
+                      'efficacy', 'safety', 'clinical', 'trial']
+    
+    title = paper.get('metadata', {}).get('title', '').lower()
+    pico = paper.get('pico_en', {})
+    patient = pico.get('patient', '').lower()
+    intervention = pico.get('intervention', '').lower()
+    outcome = pico.get('outcome', '').lower()
+    
+    all_text = f"{title} {patient} {intervention} {outcome}"
+    
+    bonus = 0.0
+    
+    for keyword in keywords:
+        keyword_lower = keyword.lower()
+        if keyword_lower in all_text:
+            if keyword in high_importance:
+                bonus += 0.05
+            elif keyword in medium_importance:
+                bonus += 0.03
+            else:
+                bonus += 0.01
+    
+    return min(bonus, 0.15)
+
+
+def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None):
+    """Search by manual vector similarity with 2-stage reranking
     
     Args:
         query_vec: Query embedding vector
         collection_name: Qdrant collection name
         limit: Number of results to return
+        query: Original query string for keyword extraction (optional)
     
     Returns:
         List of papers with similarity scores
@@ -102,10 +192,54 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
         
         logger.info(f"  Using {vector_name} vectors ({vectors.shape[1]}-dim)")
         
-        # Calculate cosine similarity
+        # Stage 1: Calculate cosine similarity
         similarities = cosine_similarity([query_vec], vectors)[0]
         
-        # Sort by similarity (highest first)
+        # Stage 2: Keyword-based reranking
+        if query:
+            # Extract keywords from query
+            keywords = extract_keywords(query)
+            
+            if keywords:
+                logger.info(f"  Keywords extracted: {keywords}")
+                
+                # Get top 30 candidates for reranking (increased from 20)
+                candidate_count = min(30, len(all_points))
+                top_indices = np.argsort(similarities)[::-1][:candidate_count]
+                
+                # Apply reranking
+                reranked_results = []
+                for idx in top_indices:
+                    point = all_points[idx]
+                    base_score = similarities[idx]
+                    
+                    # Format paper for bonus calculation
+                    paper = {
+                        'json_path': point.payload.get('json_path', ''),
+                        'paper_id': point.payload.get('paper_id', ''),
+                        'score': float(base_score),
+                        'pico_en': point.payload.get('pico_en', {}),
+                        'metadata': point.payload.get('metadata', {})
+                    }
+                    
+                    # Calculate keyword bonus
+                    bonus = calculate_keyword_bonus(paper, keywords)
+                    final_score = base_score + bonus
+                    
+                    paper['score'] = float(final_score)
+                    paper['base_score'] = float(base_score)
+                    paper['bonus'] = float(bonus)
+                    
+                    reranked_results.append(paper)
+                
+                # Sort by final score
+                reranked_results.sort(key=lambda x: x['score'], reverse=True)
+                
+                # Return top N results
+                logger.info(f"  ✓ Reranked {len(reranked_results)} results, returning top {limit}")
+                return reranked_results[:limit]
+        
+        # Fallback: Simple vector similarity (no reranking)
         top_indices = np.argsort(similarities)[::-1][:limit]
         
         # Format results
@@ -121,6 +255,9 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10):
                 'pico_en': point.payload.get('pico_en', {}),
                 'metadata': point.payload.get('metadata', {})
             })
+        
+        logger.info(f"  ✓ Found {len(results)} results by similarity (no reranking)")
+        return results
         
         logger.info(f"  ✓ Found {len(results)} results by similarity")
         return results
@@ -175,12 +312,13 @@ def search_medical_papers(query, top_k=10):
     logger.info(f"  Generated {len(query_vec)}-dim vector")
     logger.info("")
     
-    # Search by vector similarity
+    # Search by vector similarity with reranking
     logger.info(f"Searching medical_papers using {vector_name}...")
     papers = search_by_vector_similarity(
-        query_vec,
-        "medical_papers",
-        limit=top_k
+        query_vec, 
+        "medical_papers", 
+        limit=top_k,
+        query=query  # Pass query for keyword-based reranking
     )
     
     if not papers:
@@ -198,12 +336,13 @@ def search_medical_papers(query, top_k=10):
     }
 
 
-def search_atomic_facts(query, limit=5):
+def search_atomic_facts(query, limit=5, paper_ids=None):
     """Search atomic facts collection by vector similarity
     
     Args:
         query: User query
         limit: Number of results to return
+        paper_ids: Optional list of paper_ids to filter facts (only return facts from these papers)
     
     Returns:
         List of atomic facts with scores
@@ -229,6 +368,14 @@ def search_atomic_facts(query, limit=5):
         logger.info(f"  ✓ Fetched {len(all_facts)} atomic facts")
         
         if not all_facts:
+            return []
+        
+        if paper_ids:
+            all_facts = [f for f in all_facts if f.payload.get('paper_id') in paper_ids]
+            logger.info(f"  ✓ Filtered to {len(all_facts)} facts from {len(paper_ids)} papers")
+        
+        if not all_facts:
+            logger.info(f"  ✗ No facts found for specified paper_ids")
             return []
         
         # Extract SapBERT vectors (768-dim)

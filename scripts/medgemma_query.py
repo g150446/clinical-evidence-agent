@@ -35,9 +35,9 @@ def query_ollama(prompt, model="medgemma", temperature=0.1, timeout=120, stream=
                 'prompt': prompt,
                 'stream': stream,
                 'options': {
-                    'num_ctx': 8192,  # Large context for medical papers
+                    'num_ctx': 8192,
                     'temperature': temperature,
-                    'num_predict': 2048,  # Max output tokens
+                    'num_predict': 512,
                 }
             },
             timeout=timeout
@@ -48,7 +48,6 @@ def query_ollama(prompt, model="medgemma", temperature=0.1, timeout=120, stream=
         elapsed_ms = (time.time() - start_time) * 1000
         
         if stream:
-            # Handle streaming response
             full_response = ""
             for chunk in response.iter_lines():
                 if chunk:
@@ -91,6 +90,70 @@ def query_ollama(prompt, model="medgemma", temperature=0.1, timeout=120, stream=
             'duration_ms': elapsed_ms,
             'error': f'Error: {str(e)}'
         }
+
+
+def translate_query_to_english(query, model="medgemma", timeout=30):
+    """
+    Translate Japanese medical query to English using MedGemma
+    
+    Args:
+        query: Japanese query string
+        model: Model name (default: "medgemma")
+        timeout: Timeout in seconds (default: 30 for quick translation)
+    
+    Returns:
+        dict with 'translation', 'duration_ms', 'error'
+    """
+    prompt = f"""Translate this Japanese medical question to English. Output ONLY the English translation, no explanations or additional text.
+
+Japanese: {query}
+English:"""
+    
+    result = query_ollama(
+        prompt=prompt,
+        model=model,
+        temperature=0.1,
+        timeout=timeout
+    )
+    
+    if result['error']:
+        return {
+            'original': query,
+            'translation': query,
+            'duration_ms': result['duration_ms'],
+            'error': result['error']
+        }
+    
+    translation = result['response'].strip()
+    
+    # クリーンアップ：余計なテキストを削除
+    translation = translation.replace('English:', '').strip()
+    translation = translation.replace('The English translation is:', '').strip()
+    translation = translation.replace('The translation is:', '').strip()
+    translation = translation.replace('"', '').strip()
+    translation = translation.replace("'", '').strip()
+    
+    # 改行で区切って最初の有効な行を使用
+    lines = translation.split('\n')
+    clean_lines = []
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith('Japanese:') and not line.startswith('The '):
+            clean_lines.append(line)
+    
+    if clean_lines:
+        translation = clean_lines[0]
+    
+    # 文で終わらない場合は補完
+    if translation and not translation.endswith('?') and not translation.endswith('.'):
+        translation += '?'
+    
+    return {
+        'original': query,
+        'translation': translation,
+        'duration_ms': result['duration_ms'],
+        'error': None
+    }
 
 
 def ask_medgemma_direct(query, model="medgemma", temperature=0.1, timeout=120, verbose=False):
@@ -170,60 +233,47 @@ def build_prompt_with_qdrant(papers, atomic_facts, query, language='en', verbose
             print(f"  {i+1}. {fact}")
     
     papers_summary = ""
-    for i, paper in enumerate(papers[:3], 1):  # Top 3 papers
+    for i, paper in enumerate(papers[:3], 1):
         metadata = paper.get('metadata', {})
         pico = paper.get('pico_en', {})
         
-        papers_summary += f"""
-Paper {i}: {metadata.get('title', 'Unknown')}
+        papers_summary += f"""Paper {i}: {metadata.get('title', 'Unknown')}
 PMID: {paper.get('paper_id', 'Unknown')}
-Journal: {metadata.get('journal', 'Unknown')} ({metadata.get('publication_year', 'Unknown')})
-PICO:
-  Patient: {pico.get('patient', 'N/A')}
-  Intervention: {pico.get('intervention', 'N/A')}
-  Comparison: {pico.get('comparison', 'N/A')}
-  Outcome: {pico.get('outcome', 'N/A')}
+Patient: {pico.get('patient', 'N/A')}
+Intervention: {pico.get('intervention', 'N/A')}
+Outcome: {pico.get('outcome', 'N/A')}
 
 """
     
-    # Build atomic facts summary
-    facts_summary = "\n".join(f"• {fact}" for fact in atomic_facts[:5])  # Top 5 facts
+    facts_summary = "\n".join(f"• {fact}" for fact in atomic_facts[:5])
     
-    # Language-specific template
     if language == 'ja':
-        template = f"""以下の医療エビデンスに基づいて、質問に回答してください。
+        template = f"""以下の医療エビデンスに基づいて、質問に簡潔に回答してください。
+
+回答のガイドライン:
+- 結論を1つの段落で簡潔に述べる（100文字以内）
+- 重要ポイントを3〜5個の箇条書きでまとめる
+- 繰り返しを避け、新しい情報だけを追加する
 
 質問: {query}
 
-関連論文 ({len(papers)} 件):
+関連論文:
 {papers_summary}
 
 主要な発見:
 {facts_summary}
 
-上記のエビデンスを考慮して、質問に対する構造化された回答を提供してください。
-1. 主要な発見
-2. エビデンスレベル
-3. 注意点や制限事項
-4. 利益相反情報
-
 回答:"""
-    else:  # Default to English
-        template = f"""Based on the following medical evidence, answer the question.
+    else:
+        template = f"""Based on the following medical evidence, answer the question concisely.
 
 Query: {query}
 
-Relevant Papers ({len(papers)} 件):
+Relevant Papers:
 {papers_summary}
 
-Key Findings (Atomic Facts):
+Key Findings:
 {facts_summary}
-
-Considering the above evidence, provide a structured answer to the query that includes:
-1. Main finding
-2. Evidence level
-3. Any limitations or caveats
-4. Conflicts of interest
 
 Answer:"""
     
@@ -268,28 +318,55 @@ def ask_medgemma_with_qdrant(papers, atomic_facts, query, language='en', model="
 
 
 def run_rag_query(query, verbose=False):
-    """RAGモード: Qdrant検索 → MedGemma生成"""
+    """RAGモード: Qdrant検索 → MedGemma生成
+    
+    日本語クエリの場合は、まずMedGemmaで英語に翻訳してから検索を実行
+    （SapBERTは英語訓練済みのため、英語クエリで高精度な検索が可能）
+    """
     import os, sys
+    import re
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import search_qdrant  # lazy import
     
+    # 言語検出
+    is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query))
+    language = 'ja' if is_japanese else 'en'
+    
+    # 日本語の場合は英語に翻訳して検索
+    search_query = query
+    if is_japanese:
+        print("0. 日本語クエリを英語に翻訳...")
+        translation_result = translate_query_to_english(query)
+        if translation_result.get('error'):
+            print(f"   ✗ 翻訳エラー: {translation_result['error']}")
+            print(f"   ⚠ 元のクエリで検索を続行")
+        else:
+            search_query = translation_result['translation']
+            if verbose:
+                print(f"   ✓ 翻訳完了: {query}")
+                print(f"   → 英語: {search_query}")
+    
     print("1. Qdrant検索実行...")
-    search_results = search_qdrant.search_medical_papers(query, top_k=5)
+    search_results = search_qdrant.search_medical_papers(search_query, top_k=5)
     papers = search_results['papers']
-    language = search_results.get('query_language', 'en')
     
     if verbose:
         print(f"   ✓ 言語検出: {language}")
+        print(f"   ✓ 検索クエリ: {search_query}")
         print(f"   ✓ 論文数: {len(papers)}")
     
+    # 上位3論文のpaper_idsを取得して、関連性の高いatomic factsのみを取得
+    paper_ids = [p.get('paper_id') for p in papers[:3]]
+    
     print("2. Atomic Facts検索実行...")
-    facts_raw = search_qdrant.search_atomic_facts(query, limit=5)
+    facts_raw = search_qdrant.search_atomic_facts(search_query, limit=5, paper_ids=paper_ids)
     atomic_facts = [f['fact_text'] for f in facts_raw]  # 文字列リストに変換
     
     if verbose:
         print(f"   ✓ アトミックファクト数: {len(atomic_facts)}")
     
     print("3. MedGemma生成実行...")
+    # 回答は元の言語で生成（日本語クエリなら日本語で回答）
     return ask_medgemma_with_qdrant(papers, atomic_facts, query, language=language, verbose=verbose)
 
 

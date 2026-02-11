@@ -20,7 +20,9 @@ An intelligent medical evidence retrieval system combining:
 ```
 User Query (EN/JA)
     ↓
-Qdrant Semantic Search (Vector Similarity)
+Qdrant Semantic Search
+    ├── Stage 1: Vector Similarity (top 30 candidates)
+    └── Stage 2: Keyword Reranking (JP→EN mapping + bonus scores)
     ↓
 Top 5 Papers + Atomic Facts
     ↓
@@ -290,13 +292,24 @@ python3 scripts/setup_qdrant.py
    - English: Use `e5_questions_en` vector (1024-dim)
    - Japanese: Use `e5_questions_ja` vector (1024-dim)
    - Format: `'query: <user query>'`
-5. Fetch all points from `medical_papers` collection (up to 10K)
-6. Extract vectors and calculate cosine similarity with priority order:
-   - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
-   - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
-   - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
-7. Sort by similarity (highest first)
-8. Return top K papers with full metadata
+5. **Stage 1: Vector Similarity**
+   - Fetch all points from `medical_papers` collection (up to 10K)
+   - Extract vectors with priority order:
+     - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
+     - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
+     - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
+   - Calculate cosine similarity
+   - Select top 30 candidates
+6. **Stage 2: Keyword-Based Reranking**
+   - Extract medical keywords from query (English or Japanese)
+   - For Japanese keywords: translate to English equivalents via `JP_TO_EN_KEYWORDS`
+   - Calculate bonus scores based on keyword importance:
+     - High importance (+0.05): osteoarthritis, knee, joint, etc.
+     - Medium importance (+0.03): cardiovascular, diabetes, obesity, etc.
+     - Low importance (+0.01): glp1, semaglutide, treatment, etc.
+   - Add bonus to base similarity score (max bonus: 0.15)
+   - Re-sort by final score
+7. Return top K papers with full metadata
 
 **Models Used**:
 - `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
@@ -322,9 +335,12 @@ python3 scripts/search_qdrant.py "肥満治療について教えてください"
 **Key Features**:
 - Real models: Uses actual Qdrant embeddings (not mock data)
 - Bilingual support: English + Japanese queries
-- Vector similarity: Cosine similarity for ranking
-- Fast retrieval: Fetch all points, calculate similarities locally
+- **2-stage reranking**: Vector similarity (Stage 1) + keyword bonus (Stage 2)
+- **Japanese-English mapping**: Translates Japanese keywords to English equivalents for matching
+- Fast retrieval: Top 30 candidates → Rerank → Top K results
 - Comprehensive metadata: Full PICO, title, journal, year, authors
+
+See [docs/japanese-query-reranking.md](docs/japanese-query-reranking.md) for details on the 2-stage search algorithm.
 
 **Note**: This is the final search pipeline with real Qdrant models, completing Phase 3
 
@@ -1123,6 +1139,27 @@ print(f'Payload: {scroll_result[0][0].payload}')
 - **Files updated**:
   - `scripts/medgemma_query.py`: Added argparse support, verbose parameter to all functions, detailed logging for retrieved papers and facts
   - `README.md`: Updated usage examples and key features to document verbose flag
+
+### v1.4 (2026-02-11) - 2-Stage Search with Japanese-English Keyword Mapping
+- **Problem**: PMID 39476339 (semaglutide + knee osteoarthritis) not ranking highly for relevant queries
+- **Root cause (English)**: Vector similarity alone insufficient for medical term importance
+- **Root cause (Japanese)**: PICO data stored in English, Japanese keywords couldn't match
+- **Solution Part 1**: 2-stage search algorithm
+  - Stage 1: Vector similarity search (retrieve top 30 candidates)
+  - Stage 2: Keyword-based reranking with importance weights
+  - High importance (+0.05): osteoarthritis, knee, hip, joint, etc.
+  - Medium importance (+0.03): cardiovascular, diabetes, obesity, etc.
+  - Low importance (+0.01): glp1, semaglutide, treatment, efficacy, etc.
+- **Solution Part 2**: Japanese-English keyword mapping (`JP_TO_EN_KEYWORDS`)
+  - Maps Japanese medical terms to English equivalents
+  - Example: 変形性膝関節症 → osteoarthritis, knee
+  - Example: 受容体作動薬 → receptor agonist, agonist
+  - Covers: joint diseases, organs, metabolic terms, GLP-1 drugs, clinical terms
+- **Result**: PMID 39476339 ranks #1 for both English (0.984) and Japanese (0.932) queries
+- **Files updated**:
+  - `scripts/search_qdrant.py`: Added `extract_keywords()`, `calculate_keyword_bonus()`, `JP_TO_EN_KEYWORDS` dictionary
+  - `docs/japanese-query-reranking.md`: Comprehensive documentation
+  - `README.md`: Updated workflow and key features
 
 ---
 

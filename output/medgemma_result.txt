@@ -1,0 +1,71 @@
+Initializing Qdrant client...
+✓ Qdrant client initialized
+Loading embedding models...
+✓ SapBERT loaded
+✓ multilingual-e5 loaded
+✓ All models loaded
+
+1. Qdrant検索実行...
+   ✓ 言語検出: ja
+   ✓ 論文数: 5
+2. Atomic Facts検索実行...
+   ✓ アトミックファクト数: 5
+3. MedGemma生成実行...
+
+検索された論文詳細:
+
+論文 1:
+  PMID: PMID_39476339
+  Title: Once-Weekly Semaglutide in Persons with Obesity and Knee Osteoarthritis.
+  Journal: The New England journal of medicine (2024)
+  Score: 0.936144832705715
+  PICO Patient: Adults with obesity (BMI ≥30) and a clinical and radiologic diagnosis of moderate knee osteoarthritis with at least moderate pain. Mean age 56 years, mean BMI 40.3, mean WOMAC pain score 70.9. 81.6% women.
+  PICO Intervention: Once-weekly subcutaneous semaglutide (2.4 mg) in addition to counseling on physical activity and a reduced-calorie diet for 68 weeks.
+  PICO Outcome: Percentage change in body weight from baseline to week 68: -13.7% with semaglutide vs. -3.2% with placebo (P<0.001). Change in WOMAC pain score from baseline to week 68: -41.7 points with semaglutide vs. -27.5 points with placebo (P<0.001). Change in SF-36 physical-function score: 12.0 points with semaglutide vs. 6.5 points with placebo (P<0.001).
+
+論文 2:
+  PMID: PMID_40499738
+  Title: Glucagon-Like Peptide-1 Receptor Agonists and Gastrointestinal Adverse Events: A Systematic Review and Meta-Analysis.
+  Journal: Gastroenterology (2025)
+  Score: 0.8303234418938495
+  PICO Patient: Patients with type 2 diabetes mellitus, overweight/obesity, or metabolic dysfunction-associated steatohepatitis/metabolic dysfunction-associated steatotic liver disease.
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs). Specific dosing, duration, and formulation details were evaluated in subgroup analyses but not specified for the overall meta-analysis.
+  PICO Outcome: Increased risk of cholelithiasis (Risk Ratio [RR], 1.46; 95% CI, 1.09-1.97; 2 more cases per 1000) and probable increased risk of GERD (RR, 2.19; 95% CI, 1.48-3.25; 4 more cases per 1000) compared with placebo.
+
+論文 3:
+  PMID: PMID_39841962
+  Title: Efficacy of GLP-1 Receptor Agonists on Weight Loss, BMI, and Waist Circumference for Patients With Obesity or Overweight: A Systematic Review, Meta-analysis, and Meta-regression of 47 Randomized Controlled Trials.
+  Journal: Diabetes care (2025)
+  Score: 0.8238093192270448
+  PICO Patient: Adults with obesity or overweight, with or without diabetes.
+  PICO Intervention: Glucagon-like peptide 1 receptor agonists (GLP-1 RAs). Specific dosage and duration not detailed in abstract.
+  PICO Outcome: Mean weight reduction of -4.57 kg (95% CI -5.35 to -3.78), mean BMI reduction of -2.07 kg/m2 (95% CI -2.53 to -1.62), and mean waist circumference reduction of -4.55 cm (95% CI -5.72 to -3.38) compared with placebo.
+
+論文 4:
+  PMID: PMID_39719170
+  Title: Effect of glucagon-like peptide-1 receptor agonists and co-agonists on body composition: Systematic review and network meta-analysis.
+  Journal: Metabolism: clinical and experimental (2025)
+  Score: 0.8233432958674097
+  PICO Patient: Adults with diabetes and/or overweight/obesity
+  PICO Intervention: Glucagon-like peptide-1 receptor agonists (GLP-1RAs) and GLP-1/GIP receptor dual agonists (GLP-1/GIP-RAs)
+  PICO Outcome: Total body weight reduction (MD -3.55 kg, 95%-CI [-4.81, -2.29]), fat mass reduction (MD -2.95 kg, 95%-CI [-4.11, -1.79]), and lean mass reduction (MD -0.86 kg, 95%-CI [-1.30, -0.42])
+
+論文 5:
+  PMID: PMID_39305981
+  Title: Seven glucagon-like peptide-1 receptor agonists and polyagonists for weight loss in patients with obesity or overweight: an updated systematic review and network meta-analysis of randomized controlled trials.
+  Journal: Metabolism: clinical and experimental (2024)
+  Score: 0.8228541999027807
+  PICO Patient: Patients with obesity or overweight. Patients without type 2 diabetes mellitus (T2DM) and patients with type 2 diabetes mellitus (T2DM). Patients with high body mass index (BMI) and patients with low BMI.
+  PICO Intervention: Seven GLP-1 receptor agonists and polyagonists: mazdutide (6 or 4.5 mg), retatrutide (12 or 8 mg), tirzepatide (15 or 10 mg), liraglutide (3.0 mg), semaglutide (2.4 mg), orforglipron (45 or 36 mg), and beinaglutide (0.2 mg). Intervention duration of at least 16 weeks.
+  PICO Outcome: Percentage change in body weight from baseline. Retatrutide 12 mg: -22.10% (CI not provided, p-value not provided). Retatrutide 8 mg: -20.70% (CI not provided, p-value not provided). Tirzepatide 15 mg: -16.53% (CI not provided, p-value not provided).
+
+アトミックファクト (5 件):
+  2. The study was a phase 3, multinational, randomized, double-blind trial investigating orforglipron for obesity treatment.
+  3. All comparisons of orforglipron doses to placebo for body weight change were statistically significant (P<0.001).
+  4. Orforglipron led to improvement in all prespecified weight-related and cardiometabolic measures.
+  5. Waist circumference, systolic blood pressure, triglyceride levels, and non-HDL cholesterol levels significantly improved with orforglipron treatment compared to placebo.
+  6. In the Obesity study, orforglipron reduced systolic blood pressure (SBP) by -6.5 to -10.6 mmHg compared to -1.9 mmHg for placebo (p < 0.05).
+
+======================================================================
+✗ Error: Timeout after 120s
+======================================================================
