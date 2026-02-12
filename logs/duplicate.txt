@@ -1,0 +1,74 @@
+Initializing Qdrant client...
+✓ Qdrant client initialized
+Loading embedding models...
+✓ SapBERT loaded
+✓ multilingual-e5 loaded
+✓ All models loaded
+
+0. Translating query...
+   -> The question is "変形性膝関節症をglp1受容体作動薬は改善させますか" which translates to "Do GLP-1 receptor agonists improve osteoarthritis?".
+
+The English translation is:
+"Do GLP-1 receptor agonists improve osteoarthritis?"
+1. Searching papers...
+2. Searching specific facts...
+3. Generating answer...
+
+=== CONTEXT PREPARATION ===
+Added block for PMID_39476339
+Added block for PMID_41090431
+Added block for PMID_40789597
+
+--- PROMPT SENT TO MODEL ---
+あなたは医療AIアシスタントです。以下の「Evidence」のみに基づいて質問に答えてください。
+外部知識は使用せず、提供された情報に含まれる数値（体重減少率、スコア改善など）を具体的に引用してください。
+
+質問: 変形性膝関節症をglp1受容体作動薬は改善させますか
+
+参照エビデンス:
+[Evidence 1]
+Title: Once-Weekly Semaglutide in Persons with Obesity and Knee Osteoarthritis.
+Intervention: Once-weekly subcutaneous semaglutide (2.4 mg) in addition to counseling on physical activity and a reduced-calorie diet for 68 weeks.
+Outcome: Percentage change in body weight from baseline to week 68: -13.7% with semaglutide vs. -3.2% with placebo (P<0.001). Change in WOMAC pain score from baseline to week 68: -41.7 points with semaglutide vs. -27.5 points with placebo (P<0.001). Change in SF-36 physical-function score: 12.0 points with semaglutide vs. 6.5 points with placebo (P<0.001).
+
+[Evidence 2]
+Title: Retatrutide for the treatment of obesity, obstructive sleep apnea and knee osteoarthritis: Rationale and design of the TRIUMPH registrational clinical trials.
+Intervention: Retatrutide 4, 9, or 12 mg once weekly (QW) subcutaneously, or placebo, for 80 weeks (TRIUMPH-1, -2, -3) or 68 weeks (TRIUMPH-4), following a 16-week dose escalation period. All participants received lifestyle counseling (healthy diet, ≥150 min/week physical activity).
+Outcome: Primary endpoints include percent change in body weight from baseline to Week 80 (TRIUMPH-1, -2, -3), change in Apnea-Hypopnea Index (AHI) from baseline to Week 80 (OSA baskets), and change in the Western Ontario and McMaster Universities Osteoarthritis Index (WOMAC) pain subscale score from baseline to Week 68 (TRIUMPH-4) or Week 80 (OA basket). Type I error controlled at α=0.05, split between overarching weight management and each basket trial.
+Key Facts:
+- TRIUMPH-4 is a stand-alone OA trial for obesity with knee OA, BMI ≥27 kg/m², and has 435 participants over 68 weeks.
+- The TRIUMPH clinical development program evaluates retatrutide, a triple GIPR, GLP-1R, and GCGR agonist.
+- Inclusion criteria for OA baskets required knee pain and radiographic evidence of knee OA.
+
+[Evidence 3]
+Title: Pharmacotherapy for obesity management in adults: 2025 clinical practice guideline update.
+Intervention: Pharmacotherapy for obesity management, including Semaglutide 2.4 mg weekly, Tirzepatide (5, 10, 15 mg weekly), Liraglutide 3 mg daily, Naltrexone–bupropion 16 mg/180 mg twice daily, Orlistat 120 mg 3 times daily, and Setmelanotide up to 3 mg daily. Used in conjunction with health behavior changes (medical nutrition therapy, physical activity).
+Outcome: Clinically meaningful weight loss and improvements in obesity-related health complications. Specific outcomes include reduction in major adverse cardiovascular events, improvement in HF symptoms, reduction in progression to type 2 diabetes or achievement of normoglycemia, improved glycemic control, MASH resolution/fibrosis improvement, improved apnea-hypopnea index, and reduced knee pain. Quantitative results for weight change are provided for specific medications.
+Key Facts:
+- Orlistat 120 mg 3x daily demonstrated a -2.9% placebo-subtracted weight change at 1 year in a meta-analysis (16 RCTs, n=10631).
+- Semaglutide 2.4 mg weekly resulted in a -14.9% weight change compared to -2.4% for placebo at 68 weeks in an RCT (n=1961).
+
+
+回答作成のルール:
+1. 結論：はい/いいえ で答え、その理由を簡潔に。
+2. 根拠：エビデンスにある具体的な数値（%やスコア）を含めること。
+3. エビデンスにない情報は「不明」とすること。
+4. 同じ内容を繰り返さないこと。
+
+回答:
+----------------------------
+
+
+Answer:
+はい、glp1受容体作動薬は変形性膝関節症を改善させます。
+根拠：
+[Evidence 1]では、once-weekly semaglutideは68週間にわたって体重減少率を-13.7%（プラセボ-3.2%）と改善させました。
+[Evidence 3]では、Semaglutide 2.4 mg weeklyは68週間にわたって体重減少率を-14.9%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは1年間にわたって体重減少率を-2.9%（プラセボ-0.0%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 3x dailyは68週間にわたって体重減少率を-11.2%（プラセボ-2.4%）と改善させました。
+[Evidence 3]では、Orlistat 120 mg 
