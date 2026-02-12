@@ -38,6 +38,47 @@ Provide a structured answer with:
 Answer:"""
 
 
+def build_rag_prompt(papers, atomic_facts, query: str, language: str = 'en') -> str:
+    """Build RAG prompt with retrieved papers and atomic facts."""
+    papers_text = "\n\n".join([
+        f"Paper {i+1}: {p.get('metadata', {}).get('title', '')}\n"
+        f"PMID: {p.get('paper_id', '')}\n"
+        f"Journal: {p.get('metadata', {}).get('journal', '')}\n"
+        f"Year: {p.get('metadata', {}).get('publication_year', '')}\n"
+        f"Score: {round(float(p.get('score', 0)), 3)}"
+        for i, p in enumerate(papers[:3])
+    ])
+    
+    facts_text = "\n".join([f"- {f}" for f in atomic_facts[:5]])
+    
+    if language == 'ja':
+        return f"""以下の医療質問に基づいて、提供されたエビデンスに基づいて回答してください。
+
+質問: {query}
+
+関連論文:
+{papers_text}
+
+主要なファクト:
+{facts_text}
+
+関連研究やデータポイントを具体的に引用しながら、包括的な回答を日本語で提供してください。
+回答:"""
+    else:
+        return f"""Answer the following medical question based on the provided evidence.
+
+Question: {query}
+
+Relevant Papers:
+{papers_text}
+
+Key Facts:
+{facts_text}
+
+Provide a comprehensive answer in English, citing specific studies and data points when relevant.
+Answer:"""
+
+
 def stream_ollama(prompt: str):
     """Generator: yields tokens from Ollama streaming API."""
     resp = http_requests.post(
@@ -78,7 +119,7 @@ def index():
 def status():
     """Return connectivity status of Ollama and Qdrant."""
     result = {}
-
+    
     # Ollama
     try:
         resp = http_requests.get('http://localhost:11434/api/tags', timeout=5)
@@ -86,16 +127,15 @@ def status():
         result['ollama'] = {'ok': True, 'models': models}
     except Exception as exc:
         result['ollama'] = {'ok': False, 'error': str(exc)}
-
-    # Qdrant
+    
+    # Qdrant - Use existing client from search_qdrant.py
     try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(path="./qdrant_medical_db")
-        collections = [c.name for c in client.get_collections().collections]
+        import search_qdrant
+        collections = [c.name for c in search_qdrant.client.get_collections().collections]
         result['qdrant'] = {'ok': True, 'collections': collections}
     except Exception as exc:
         result['qdrant'] = {'ok': False, 'error': str(exc)}
-
+    
     return jsonify(result)
 
 
@@ -157,8 +197,8 @@ def query():
                 }
                 yield sse({'type': 'context', 'context': context_payload})
 
-                from medgemma_query import build_prompt_with_qdrant
-                rag_prompt = build_prompt_with_qdrant(papers, atomic_facts, query_text, language)
+                # Build RAG prompt with retrieved papers and atomic facts
+                rag_prompt = build_rag_prompt(papers, atomic_facts, query_text, language)
 
             # ── Compare mode: stream RAG then direct ──────────────────────
             if mode == 'compare':
@@ -199,4 +239,4 @@ def query():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)

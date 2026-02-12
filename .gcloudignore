@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Data directories
+qdrant_medical_db/
+data/
+
+# Tests
+.pytest_cache/
+.coverage
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker and Tailscale
+docker-compose.yml
+start.sh
+
+# Plans (documentation only)
+plans/

@@ -347,6 +347,43 @@ def search_atomic_facts(query, limit=5, paper_ids=None):
         return []
 
 if __name__ == '__main__':
-    # Simple CLI test
+    # CLI interface with argument parsing
+    parser = argparse.ArgumentParser(description='Search medical papers using Qdrant')
+    parser.add_argument('query', help='Search query text')
+    parser.add_argument('--top_k', type=int, default=5, help='Number of results to return (default: 5)')
+    args = parser.parse_args()
+    
+    # Set up logging
     logging.basicConfig(level=logging.INFO)
-    search_medical_papers("semaglutide osteoarthritis")
+    
+    # Execute search
+    results = search_medical_papers(args.query, top_k=args.top_k)
+    papers = results.get('papers', [])
+    query_lang = results.get('query_language', 'en')
+    search_time = results.get('search_time_ms', 0)
+    
+    # Display results
+    print(f"\n検索クエリ: {results['query']}")
+    print(f"言語: {'日本語' if query_lang == 'ja' else '英語'}")
+    print(f"検索時間: {search_time:.2f}ms")
+    print(f"\n上位{len(papers)}件の関連論文:")
+    print("=" * 80)
+    
+    for i, paper in enumerate(papers, 1):
+        title = paper.get('metadata', {}).get('title', 'N/A')
+        pmid = paper.get('paper_id', 'N/A')
+        journal = paper.get('metadata', {}).get('journal', 'N/A')
+        year = paper.get('metadata', {}).get('publication_year', 'N/A')
+        score = round(float(paper.get('score', 0)), 3)
+        
+        print(f"\n{i}. {title}")
+        print(f"   PMID: {pmid}")
+        print(f"   スコア: {score}")
+        print(f"   ジャーナル: {journal}")
+        if year and year != 'N/A':
+            print(f"   年: {year}")
+    
+    if len(papers) == 0:
+        print("\n関連する論文が見つかりませんでした。")
+    
+    print("\n" + "=" * 80)
