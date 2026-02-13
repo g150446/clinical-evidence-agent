@@ -110,7 +110,6 @@ def process_paper(paper_path):
             return False, None, None, 0
         
         questions_en = paper['multilingual_interface'].get('generated_questions', {}).get('en', [])
-        questions_ja = paper['multilingual_interface'].get('generated_questions', {}).get('ja', [])
         
         # 1. SapBERT PICO embedding (768 dim)
         pico_combined = f"{pico.get('patient', '')} {pico.get('intervention', '')} {pico.get('comparison', '')} {pico.get('outcome', '')}"
@@ -132,20 +131,11 @@ def process_paper(paper_path):
         else:
             e5_questions_en_vec = np.zeros(1024, dtype=np.float32)
         
-        # 4. E5 Japanese questions (1024 dim, average with query: prefix)
-        if questions_ja:
-            e5_q_ja_vecs = [
-                multilingual_e5.encode(f"query: {q}", normalize_embeddings=True)
-                for q in questions_ja
-            ]
-            e5_questions_ja_vec = np.mean(e5_q_ja_vecs, axis=0)
-        else:
-            e5_questions_ja_vec = np.zeros(1024, dtype=np.float32)
-        
+
         # Generate unique UUID for paper (FIXED: correctly placed at top level)
         paper_uuid = str(uuid.uuid4())
         
-        # 5. Upsert to medical_papers collection (4 named vectors)
+        # 5. Upsert to medical_papers collection (3 named vectors)
         client.upsert(
             collection_name="medical_papers",
             points=[
@@ -154,8 +144,7 @@ def process_paper(paper_path):
                     vector={
                         "sapbert_pico": sapbert_pico_vec.tolist(),
                         "e5_pico": e5_pico_vec.tolist(),
-                        "e5_questions_en": e5_questions_en_vec.tolist(),
-                        "e5_questions_ja": e5_questions_ja_vec.tolist()
+                        "e5_questions_en": e5_questions_en_vec.tolist()
                     },
                     payload={
                         "json_path": str(paper_path),

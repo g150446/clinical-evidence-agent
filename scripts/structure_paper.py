@@ -95,7 +95,9 @@ Compressed text:"""
         return full_text[:max_length] + "\n\n[Simple truncation - LLM compression failed]"
 
 # Prompts
-STRUCTURE_PROMPT = """You are a medical research expert specializing in evidence synthesis. Structure the following paper according to the 5-layer schema below.
+STAGE1_PROMPT = """You are a medical research expert specializing in evidence synthesis. Structure the following paper according to schema below.
+
+NOTE: Do NOT generate atomic_facts_en or embeddings_metadata in this step. They will be generated separately.
 
 IMPORTANT: 
 - Return ONLY valid JSON, no markdown formatting
@@ -142,11 +144,6 @@ Return valid JSON in this exact format:
       "comparison": "Comparison group details",
       "outcome": "Primary outcome with quantitative results, 95% CI, p-value"
     }},
-    "atomic_facts_en": [
-      "Self-contained fact 1: must include intervention name, condition, PMID, and quantitative data (e.g., 'Semaglutide 2.4mg reduced body weight by 13.7% vs 3.2% with placebo in adults with obesity and knee osteoarthritis (PMID_39476339).')",
-      "Self-contained fact 2: each fact independently understandable without reading other facts",
-      ...
-    ],
     "quantitative_data": {{
       "primary_outcome": {{
         "metric": "outcome_measure",
@@ -164,33 +161,16 @@ Return valid JSON in this exact format:
         "Question 1 in natural English",
         "Question 2...",
         ...
-      ],
-      "ja": [
-        "日本語での質問1（自然な表現）",
-        "質問2...",
-        ...
       ]
     }},
     "mesh_terminology": {{
       "D00XXXXX": {{
         "preferred_en": "Preferred English term",
         "synonyms": {{
-          "en": ["Synonym1", "Synonym2"],
-          "ja": ["日本語同義語1", "日本語同義語2"]
+          "en": ["Synonym1", "Synonym2"]
         }}
       }}
     }}
-  }},
-  "embeddings_metadata": {{
-    "sapbert_targets": [
-      "PICO combined text for medical concept embedding",
-      "Key atomic facts for SapBERT"
-    ],
-    "multilingual_e5_targets": [
-      "passage: PICO combined text",
-      "query: English questions",
-      "query: Japanese questions"
-    ]
   }},
   "limitations": {{
     "study_limitations": [
@@ -219,27 +199,10 @@ Rules for each layer:
 - Preserve original terminology
 - Avoid vague descriptions
 
-**Layer B: Atomic Facts (English only)**
-- Create 10-20 facts, each 1 sentence with 1 verifiable fact
-- CRITICAL: Each fact must be SELF-CONTAINED and understandable WITHOUT any other context
-  - NEVER start with "The study", "The participants", "The trial", "The authors" as the sole subject
-  - ALWAYS include: (1) the specific intervention name and dosage, (2) the condition/population, and (3) the PMID
-  - Each fact must pass the "isolation test": reading ONLY that one sentence, the reader must know WHAT study, WHAT intervention, WHAT population, and WHAT was measured
-- Examples:
-  - BAD:  "The mean age of participants was 56 years."
-  - GOOD: "In the semaglutide 2.4mg trial for obesity with knee osteoarthritis (PMID_39476339), the mean age of participants was 56 years."
-  - BAD:  "The reduction was statistically significant (p<0.001)."
-  - GOOD: "The body weight reduction with semaglutide 2.4mg vs placebo was statistically significant (p<0.001) in the 68-week RCT (PMID_39476339)."
-  - BAD:  "Gastrointestinal disorders were the most common reason for discontinuation."
-  - GOOD: "Gastrointestinal disorders were the most common reason for discontinuation in the semaglutide 2.4mg group in the obesity/knee osteoarthritis trial (PMID_39476339)."
-- Include quantitative data and statistical significance
-- Separate author claims from observed facts
-
-**Layer C: Generated Questions (English + Japanese)**
-- Generate 10-20 questions for EACH language
+**Layer C: Generated Questions (English only)**
+- Generate 10-20 questions in English
 - Use natural, user-facing language (not mechanical translation)
 - Cover: efficacy, safety, duration, comparisons, side effects
-- Japanese questions should be natural for native speakers
 
 **Layer D: Limitations**
 - List study limitations with specific quantitative details
@@ -251,15 +214,96 @@ Rules for each layer:
 - Leave empty arrays [] for now (will be filled later)
 
 **MeSH Terminology**
-- Map ONLY 3-5 most relevant MeSH IDs to bilingual synonyms
-- Include both English and Japanese terms for key concepts (intervention, disease, outcome)
+- Map ONLY 3-5 most relevant MeSH IDs to English synonyms
+- Include English terms for key concepts (intervention, disease, outcome)
 - Do NOT include every single MeSH term
- 
-**Embeddings Metadata**
-- List targets for SapBERT (medical concepts)
-- List targets for multilingual-e5 (questions with query: prefix)
- 
+
 Return ONLY the JSON object, no markdown or explanation."""
+
+
+STAGE2_PROMPT = """You are a medical research expert. Generate atomic facts and embeddings metadata for the following paper.
+
+Paper Information:
+Title: {title}
+PMID: {pmid}
+Abstract: {abstract}
+Full Text: {full_text}
+
+The following questions have already been generated for this paper:
+
+English Questions:
+{questions_en}
+
+PICO (already extracted):
+{pico_en}
+
+YOUR TASK: Generate atomic_facts_en and embeddings_metadata.
+
+CRITICAL RULES FOR atomic_facts_en:
+1. Create 10-20 facts that collectively ANSWER the generated questions above
+2. Each fact must be a SINGLE, SELF-CONTAINED sentence that is understandable WITHOUT any other context
+3. NEVER use "The study", "The participants", "The trial", "The authors" as the sole subject
+4. ALWAYS include in each fact: (1) the specific intervention name and dosage, (2) the condition/population, and (3) the PMID
+5. Each fact must pass the "isolation test": reading ONLY that one sentence, the reader must know WHAT study, WHAT intervention, WHAT population, and WHAT was measured
+6. After writing facts that answer the questions, add additional facts for important information NOT covered by any question (e.g., dropout rates, demographic details, safety data)
+7. Include quantitative data (numbers, units, confidence intervals, p-values) wherever available
+
+Examples:
+- BAD:  "The mean age of participants was 56 years."
+- GOOD: "In the semaglutide 2.4mg trial for obesity with knee osteoarthritis (PMID_39476339), the mean age of participants was 56 years."
+- BAD:  "The reduction was statistically significant (p<0.001)."
+- GOOD: "The body weight reduction with semaglutide 2.4mg vs placebo was statistically significant (p<0.001) in the 68-week RCT (PMID_39476339)."
+- BAD:  "Gastrointestinal disorders were the most common reason for discontinuation."
+- GOOD: "Gastrointestinal disorders were the most common reason for trial discontinuation in the semaglutide 2.4mg group in the obesity/knee osteoarthritis trial (PMID_39476339)."
+
+Return ONLY valid JSON in this exact format:
+{{
+  "atomic_facts_en": [
+    "Self-contained fact 1 answering a generated question, with intervention name, condition, PMID, and quantitative data",
+    "Self-contained fact 2...",
+    ...
+  ],
+    "embeddings_metadata": {{
+    "sapbert_targets": [
+      "PICO combined text for SapBERT embedding (copy from PICO data above)",
+      "Each atomic fact listed individually for SapBERT embedding"
+    ],
+    "multilingual_e5_targets": [
+      "passage: PICO combined text with passage: prefix",
+      "query: Each English question with query: prefix"
+    ]
+  }}
+}}
+
+Return ONLY the JSON object, no markdown or explanation."""
+
+
+def clean_llm_json_response(content):
+    """Extract and clean JSON from LLM response"""
+    if content is None:
+        raise ValueError("Empty response from LLM")
+    
+    content = content.strip()
+    
+    # Remove markdown code blocks
+    if content.startswith('```json'):
+        content = content[7:]
+    elif content.startswith('```'):
+        content = content[3:]
+    if content.endswith('```'):
+        content = content[:-3]
+    content = content.strip()
+
+    # Remove control characters
+    content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', content)
+
+    # Remove system-reminder injection
+    if '<system-reminder>' in content or '</system-reminder>' in content:
+        print(f"  ! Warning: system-reminder tags detected in response")
+        content = re.sub(r'<system-reminder>.*?</system-reminder>', '', content, flags=re.DOTALL)
+        content = content.strip()
+
+    return json.loads(content)
 
 
 def safe_write_json(data, filepath):
@@ -286,31 +330,27 @@ def safe_write_json(data, filepath):
 
 
 def structure_paper(paper_data, max_retries=3):
-    """Structure a single paper using LLM"""
+    """Structure a single paper using LLM in 2 stages"""
     
-    # Extract sample size from text
+    # === 前処理（既存のまま） ===
     abstract_text = paper_data.get('abstract', '')
     full_text = paper_data.get('full_text', '')
     sample_size = extract_sample_size(abstract_text)
 
-    # Compress full text using LLM if available and too long
-    max_full_text_length = 5000
-    if full_text and len(full_text) > max_full_text_length:
+    if full_text and len(full_text) > 5000:
         print(f"  ! Full text is {len(full_text)} chars, compressing to preserve key information...")
-        full_text = compress_full_text_with_llm(full_text, max_length=max_full_text_length)
+        full_text = compress_full_text_with_llm(full_text, max_length=5000)
 
-    # Prepare source instruction based on full text availability
+    # source_instruction の準備（既存のまま）
     if full_text and full_text.strip():
         source_instruction = "Use the FULL TEXT for comprehensive PICO extraction, detailed atomic facts, and accurate quantitative data extraction."
     else:
         source_instruction = "Full text is NOT AVAILABLE. Use the ABSTRACT ONLY. Note that limited information may affect accuracy and completeness of PICO extraction and atomic facts. Focus on extracting available information from the abstract."
 
-    # Prepare prompt
-    # Safe conversion of authors to string
+    # authors_str の準備（既存のまま）
     authors_list = paper_data.get('authors', [])
     if isinstance(authors_list, list) and len(authors_list) > 0:
         if isinstance(authors_list[0], dict):
-            # Extract first 3 author names as string
             author_names = []
             for author in authors_list[:3]:
                 last_name = author.get('last_name', '')
@@ -320,12 +360,20 @@ def structure_paper(paper_data, max_retries=3):
                 elif last_name:
                     author_names.append(last_name)
             authors_str = ', '.join(author_names)
-        else:
-            authors_str = str(authors_list)
+    # Handle empty list case explicitly
+    if not authors_list or len(authors_list) == 0:
+        authors_str = ''
+    elif isinstance(authors_list, list):
+        authors_str = ', '.join(authors_list)
     else:
-        authors_str = str(authors_list) if authors_list else ''
+        authors_str = str(authors_list)
+
+    # =============================================
+    # Stage 1: PICO, Questions, Limitations 等の生成
+    # =============================================
+    print(f"  Stage 1: Generating PICO, questions, limitations...")
     
-    prompt = STRUCTURE_PROMPT.format(
+    stage1_prompt = STAGE1_PROMPT.format(
         title=paper_data.get('title', ''),
         authors=authors_str,
         journal=paper_data.get('journal', ''),
@@ -339,70 +387,117 @@ def structure_paper(paper_data, max_retries=3):
         mesh_terms=', '.join(paper_data.get('mesh_terms', [])),
         sample_size_from_text=sample_size
     )
-    
-    # Call LLM with retries
+
+    stage1_result = None
     for attempt in range(max_retries):
-        content = None
         try:
-            print(f"  Attempt {attempt + 1}/{max_retries}...")
+            print(f"    Stage 1 attempt {attempt + 1}/{max_retries}...")
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a medical research expert. Return only valid JSON."},
+                    {"role": "user", "content": stage1_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=16384
+            )
+            content = response.choices[0].message.content
             
+            stage1_result = clean_llm_json_response(content)
+            print(f"    ✓ Stage 1 complete")
+            break
+        except json.JSONDecodeError as e:
+            print(f"    ✗ Stage 1 JSON error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except Exception as e:
+            print(f"    ✗ Stage 1 error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+    
+    if not stage1_result:
+        print(f"  ✗ Stage 1 failed after {max_retries} attempts")
+        return None
+
+    # =============================================
+    # Stage 2: Atomic Facts + Embeddings Metadata 生成
+    # =============================================
+    print(f"  Stage 2: Generating atomic facts based on generated questions...")
+
+    # Stage 1 の結果から質問とPICOを取得
+    multilingual_interface = stage1_result.get('multilingual_interface', {})
+    if not isinstance(multilingual_interface, dict):
+        multilingual_interface = {}
+    generated_questions = multilingual_interface.get('generated_questions', {})
+    if not isinstance(generated_questions, dict):
+        generated_questions = {}
+    generated_questions_en = generated_questions.get('en', [])
+    # Handle case where questions_en might be None or empty
+    if not generated_questions_en or len(generated_questions_en) == 0:
+        questions_en = []
+    else:
+        questions_en = generated_questions_en
+    language_independent_core = stage1_result.get('language_independent_core', {})
+    if not isinstance(language_independent_core, dict):
+        language_independent_core = {}
+    pico_en = language_independent_core.get('pico_en', {})
+
+    stage2_prompt = STAGE2_PROMPT.format(
+        title=paper_data.get('title', ''),
+        pmid=paper_data.get('pmid', ''),
+        abstract=paper_data.get('abstract', ''),
+        full_text=full_text,
+        questions_en='\n'.join(f"  - {q}" for q in questions_en),
+        pico_en=json.dumps(pico_en, indent=2, ensure_ascii=False)
+    )
+
+    stage2_result = None
+    for attempt in range(max_retries):
+        try:
+            print(f"    Stage 2 attempt {attempt + 1}/{max_retries}...")
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": "You are a medical research expert. Return only valid JSON. IMPORTANT: Every atomic_facts_en entry must be a fully self-contained sentence that includes the intervention name, condition, and PMID. Never use 'The study' or 'The participants' without specifying which study."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": stage2_prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistency
-                max_tokens=16384  # Increased to handle larger outputs and avoid truncation
+                temperature=0.1,
+                max_tokens=8192
             )
-            
-            # Extract JSON from response
             content = response.choices[0].message.content
-            if content is None:
-                raise ValueError("Empty response from LLM")
-            content = content.strip()
             
-            # Remove markdown code blocks if present
-            if content.startswith('```json'):
-                content = content[7:]
-            elif content.startswith('```'):
-                content = content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
-            content = content.strip()
-
-            # Sanitize: Remove control characters except \n, \r, \t
-            # This prevents JSON errors from non-printable characters in LLM responses
-            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', content)
-
-            # Check for system-reminder injection
-            if '<system-reminder>' in content or '</system-reminder>' in content:
-                print(f"  ! Warning: system-reminder tags detected in response")
-                # Remove system-reminder tags
-                content = re.sub(r'<system-reminder>.*?</system-reminder>', '', content, flags=re.DOTALL)
-                content = content.strip()
-
-            # Parse JSON
-            structured_data = json.loads(content)
-
-            print(f"  ✓ Successfully structured")
-            return structured_data
-
+            stage2_result = clean_llm_json_response(content)
+            print(f"    ✓ Stage 2 complete")
+            break
         except json.JSONDecodeError as e:
-            print(f"  ✗ JSON parsing error: {e}")
-            if content:
-                print(f"  Content length: {len(content)} chars")
-                print(f"  First 100 chars: {content[:100]}...")
-                print(f"  Last 200 chars: ...{content[-200:]}")
+            print(f"    ✗ Stage 2 JSON error: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2)
         except Exception as e:
-            print(f"  ✗ Error: {e}")
+            print(f"    ✗ Stage 2 error: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2)
     
-    print(f"  ✗ Failed after {max_retries} attempts")
-    return None
+    if not stage2_result:
+        print(f"  ✗ Stage 2 failed after {max_retries} attempts")
+        return None
+
+    # =============================================
+    # Stage 1 + Stage 2 の結果をマージ
+    # =============================================
+    print(f"  Merging Stage 1 + Stage 2 results...")
+
+    # atomic_facts_en を language_independent_core に追加
+    if 'language_independent_core' not in stage1_result or not isinstance(stage1_result['language_independent_core'], dict):
+        stage1_result['language_independent_core'] = {}
+    stage1_result['language_independent_core']['atomic_facts_en'] = stage2_result.get('atomic_facts_en', [])
+
+    # embeddings_metadata を追加
+    stage1_result['embeddings_metadata'] = stage2_result.get('embeddings_metadata', {})
+
+    print(f"  ✓ Successfully structured (2-stage)")
+    return stage1_result
+
 
 
 def extract_sample_size(text):

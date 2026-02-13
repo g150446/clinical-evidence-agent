@@ -4,7 +4,7 @@
 
 An intelligent medical evidence retrieval system combining:
 - **Qdrant Vector Database**: Semantic search across 298 structured medical papers
-- **Embedding Models**: SapBERT + multilingual-e5 for multilingual support
+- **Embedding Models**: SapBERT + multilingual-e5 for English support
 - **MedGemma**: Direct LLM queries and RAG-enhanced synthesis
 - **Multi-Stage Retrieval**: Paper-level search + atomic fact retrieval
 
@@ -18,9 +18,7 @@ An intelligent medical evidence retrieval system combining:
 ## System Architecture
 
 ```
-User Query (EN/JA)
-    ↓
-[JA] MedGemma Translation (if Japanese query)
+User Query (EN)
     ↓
 Qdrant Semantic Search
     ├── [EN] Stage 1: Vector Similarity (top 30 candidates)
@@ -33,27 +31,29 @@ Map-Reduce Analysis
     │   ├── Extract drug name and numerical outcomes
     │   └── Filter irrelevant papers
     └── Phase 2 (Reduce): Synthesize findings
-        └── Generate comprehensive Japanese answer
+        └── Generate comprehensive English answer
     ↓
 Comprehensive Medical Answer
 ```
 
-### Component Descriptions
+---
 
-**1. Qdrant Vector Database**
+## Component Descriptions
+
+### 1. Qdrant Vector Database
 - Collections: `medical_papers`, `atomic_facts`
-- Vectors: 4 named vectors per paper, 1 per atomic fact (5 total types per docs/search-flow.md)
+- Vectors: 3 named vectors per paper, 1 per atomic fact (4 total types per docs/search-flow.md)
 - Models: SapBERT (768-dim), multilingual-e5 (1024-dim)
 - Size: All structured papers + atomic facts
 - Database: `./qdrant_medical_db`
 
-**2. Search Pipeline**
+### 2. Search Pipeline
 - Strategy: Vector similarity ranking
 - Metrics: Cosine similarity scores
-- Multilingual: English + Japanese support
+- Language: English only
 - Performance: ~400ms search time for top 5 papers
 
-**3. MedGemma Query Module**
+### 3. MedGemma Query Module
 - Modes: Direct query, RAG-enhanced synthesis
 - Integration: Ollama API
 - Context: Relevant papers + atomic facts from Qdrant
@@ -65,24 +65,35 @@ Comprehensive Medical Answer
 ### Data Structuring Scripts
 
 #### `scripts/structure_paper.py`
-**Purpose**: Structure single paper using LLM into 5-layer JSON schema
+**Purpose**: Structure single paper using LLM into 5-layer JSON schema with 2-stage processing
 
 **Input**: Subsection papers from `data/obesity/{domain}/{subsection}/papers.json` (with optional `full_text` field from `append_fulltext.py`)
 
 **Output**: Structured JSON with:
 - **Layer A**: Language-independent core (PICO_EN, atomic_facts_EN, limitations)
-- **Layer B**: Multilingual interface (generated questions in EN/JA)
+- **Layer B**: Multilingual interface (generated questions in EN only)
 - **Layer C**: Cross references (empty for now)
 - **Layer D**: Embeddings metadata (targets for models)
-- **Layer E**: MeSH terminology (bilingual synonyms)
+- **Layer E**: MeSH terminology (English synonyms only)
 
-**Workflow**:
+**Workflow (2-Stage Processing)**:
+**Stage 1**: Generate metadata, PICO, questions (EN), MeSH, quantitative data, limitations
 1. Extract sample size from abstract text
 2. Extract full text if available (from `append_fulltext.py`)
 3. Prepare prompt with all metadata (including full text if available)
 4. Query OpenRouter API with retry logic (3 attempts, exponential backoff)
 5. Parse LLM response (remove markdown, extract JSON)
-6. Validate JSON structure before writing
+
+**Stage 2**: Generate atomic facts based on Stage 1 questions
+1. Extract questions (EN only) from Stage 1 result
+2. Extract PICO from Stage 1 result
+3. Generate atomic facts that answer the generated questions
+4. Each fact must be self-contained with intervention name, condition, and PMID
+5. Generate embeddings metadata
+
+**Merge Stage 1 + Stage 2**:
+- Combine Stage 1 results (metadata, PICO, questions, limitations, etc.)
+- Add Stage 2 results (atomic_facts_en, embeddings_metadata)
 
 **Usage**:
 ```bash
@@ -93,11 +104,12 @@ python3 scripts/structure_paper.py lifestyle dietary_interventions PMID_31705259
 
 **Key Features**:
 - Retry logic: Exponential backoff (2s, 4s, 8s, 16s)
-- Error handling: Stop on LLM errors (per plan)
+- Error handling: Stop on LLM errors (per stage)
 - JSON validation: Verify structure before saving
 - Sample size detection: Extract from abstract text
 - Full text support: Optionally uses full text from PMC (if available via `append_fulltext.py`)
-- Timeout: 180 seconds per paper
+- Timeout: 180 seconds per paper total (Stage 1 + Stage 2)
+- 2-stage processing: Improves atomic facts quality by answering generated questions
 
 **Files**: Saves to `data/obesity/{domain}/{subsection}/papers/PMID_{pmid}.json`
 
@@ -204,14 +216,13 @@ python3 scripts/download_remaining_pharmacologic.py pharmacologic
 3. Filter out papers that already have embeddings
 4. Load embedding models (SapBERT + multilingual-e5)
 5. Process each paper:
-   - Extract PICO, atomic facts, generated questions
-   - Generate 5 embedding types:
-     - `sapbert_pico` (768-dim): PICO matching
-     - `e5_pico` (1024-dim): Fallback vector
-     - `e5_questions_en` (1024-dim): English questions
-     - `e5_questions_ja` (1024-dim): Japanese questions
-     - `sapbert_fact` (768-dim): Atomic facts (per fact)
-   - Upsert to Qdrant collections
+    - Extract PICO, atomic facts, generated questions (EN only)
+    - Generate 3 embedding types:
+      - `sapbert_pico` (768-dim): PICO matching
+      - `e5_pico` (1024-dim): Fallback vector
+      - `e5_questions_en` (1024-dim): English questions only
+      - `sapbert_fact` (768-dim): Atomic facts (per fact)
+    - Upsert to Qdrant collections
 6. Verify collections after completion
 7. Stop on first error (fail-safe behavior)
 
@@ -219,12 +230,12 @@ python3 scripts/download_remaining_pharmacologic.py pharmacologic
 - `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
 - `intfloat/multilingual-e5-large` (1024-dim)
 
-**Embeddings Generated** (per docs/search-flow.md):
-- Paper-level: 4 vectors per paper (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
+**Embeddings Generated** (per paper):
+- Paper-level: 3 vectors per paper (sapbert_pico, e5_pico, e5_questions_en)
 - Atomic facts: 1 vector per fact (sapbert_fact)
 
 **Qdrant Collections**:
-- `medical_papers`: Paper-level embeddings with 4 named vectors
+- `medical_papers`: Paper-level embeddings with 3 named vectors
 - `atomic_facts`: Fact-level embeddings with 1 named vector
 - Database location: `./qdrant_medical_db`
 
@@ -239,13 +250,14 @@ python3 scripts/generate_embeddings.py
 - Error handling: Stop on first error (fail-safe)
 - Fixed UUID generation: Correct placement ensures all papers get UUID
 - Qdrant path: `./qdrant_medical_db` for consistency
-- 5 embedding types: Matches search-flow.md specification
+- 3 embedding types: Matches current architecture (English questions only)
 - Verification: Check Qdrant collections after completion
 
 **Note**: Merged version combining:
 - Fixed UUID generation (from generate_embeddings_fixed.py)
 - Deduplication logic (from generate_embeddings.py)
 - Stop-on-error behavior for reliability
+- English-only question support (removed Japanese questions embeddings)
 
 ---
 
@@ -259,13 +271,12 @@ python3 scripts/generate_embeddings.py
 **Workflow**:
 1. Initialize Qdrant client (in-memory mode)
 2. Delete existing collections (if they exist)
-3. Create `medical_papers` collection with 4 named vectors:
-   - sapbert_pico: 768-dim, cosine distance
-   - e5_pico: 1024-dim, cosine distance
-   - e5_questions_en: 1024-dim, cosine distance
-   - e5_questions_ja: 1024-dim, cosine distance
+3. Create `medical_papers` collection with 3 named vectors:
+    - sapbert_pico: 768-dim, cosine distance
+    - e5_pico: 1024-dim, cosine distance
+    - e5_questions_en: 1024-dim, cosine distance
 4. Create `atomic_facts` collection with 1 named vector:
-   - sapbert_fact: 768-dim, cosine distance
+    - sapbert_fact: 768-dim, cosine distance
 
 **Usage**:
 ```bash
@@ -277,6 +288,7 @@ python3 scripts/setup_qdrant.py
 - Collection deletion: Clean state before creation
 - In-memory mode: Fast startup, no disk I/O for testing
 - Verification: Print collection configuration after creation
+- 3 paper-level vectors: Removed Japanese question embeddings (e5_questions_ja)
 
 **Note**: This script was used during Phase 2 to set up the database
 
@@ -287,36 +299,33 @@ python3 scripts/setup_qdrant.py
 #### `scripts/search_qdrant.py`
 **Purpose**: Qdrant semantic search with real embedding models (mock mode removed)
 
-**Input**: User query (English or Japanese)
+**Input**: User query (English)
 
 **Output**: Top papers ranked by vector similarity
 
 **Workflow**:
 1. Initialize Qdrant client (file-based persistence)
 2. Load embedding models (SapBERT + multilingual-e5)
-3. Detect query language (regex for Japanese characters)
-4. Generate query embedding:
-   - English: Use `e5_questions_en` vector (1024-dim)
-   - Japanese: Use `e5_questions_ja` vector (1024-dim)
-   - Format: `'query: <user query>'`
-5. **Stage 1: Vector Similarity**
-   - Fetch all points from `medical_papers` collection (up to 10K)
-   - Extract vectors with priority order:
-     - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
-     - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
-     - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
-   - Calculate cosine similarity
-   - Select top 30 candidates
-6. **Stage 2: Keyword-Based Reranking**
-   - Extract medical keywords from query (English or Japanese)
-   - For Japanese keywords: translate to English equivalents via `JP_TO_EN_KEYWORDS`
-   - Calculate bonus scores based on keyword importance:
-     - High importance (+0.05): osteoarthritis, knee, joint, etc.
-     - Medium importance (+0.03): cardiovascular, diabetes, obesity, etc.
-     - Low importance (+0.01): glp1, semaglutide, treatment, etc.
-   - Add bonus to base similarity score (max bonus: 0.15)
-   - Re-sort by final score
-7. Return top K papers with full metadata
+3. Generate query embedding:
+    - English: Use `e5_questions_en` vector (1024-dim)
+    - Format: `'query: <user query>'`
+4. **Stage 1: Vector Similarity**
+    - Fetch all points from `medical_papers` collection (up to 10K)
+    - Extract vectors with priority order:
+      - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
+      - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
+      - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
+    - Calculate cosine similarity
+    - Select top 30 candidates
+5. **Stage 2: Keyword-Based Reranking**
+    - Extract medical keywords from query (English)
+    - Calculate bonus scores based on keyword importance:
+      - High importance (+0.05): osteoarthritis, knee, joint, etc.
+      - Medium importance (+0.03): cardiovascular, diabetes, obesity, etc.
+      - Low importance (+0.01): glp1, semaglutide, treatment, etc.
+    - Add bonus to base similarity score (max bonus: 0.15)
+    - Re-sort by final score
+6. Return top K papers with full metadata
 
 **Models Used**:
 - `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
@@ -336,20 +345,16 @@ python3 scripts/setup_qdrant.py
 **Usage**:
 ```bash
 python3 scripts/search_qdrant.py "Does semaglutide reduce weight in obesity?"
-python3 scripts/search_qdrant.py "肥満治療について教えてください"
 ```
 
 **Key Features**:
 - Real models: Uses actual Qdrant embeddings (not mock data)
-- Bilingual support: English + Japanese queries
+- English-only support: English queries and embeddings
 - **2-stage reranking**: Vector similarity (Stage 1) + keyword bonus (Stage 2)
-- **Japanese-English mapping**: Translates Japanese keywords to English equivalents for matching
 - Fast retrieval: Top 30 candidates → Rerank → Top K results
 - Comprehensive metadata: Full PICO, title, journal, year, authors
 
-See [docs/japanese-query-reranking.md](docs/japanese-query-reranking.md) for details on the 2-stage search algorithm.
-
-**Note**: This is the final search pipeline with real Qdrant models, completing Phase 3
+**Note**: This is the final search pipeline with real Qdrant models, optimized for English-only queries
 
 ---
 
@@ -409,7 +414,7 @@ python3 scripts/append_fulltext.py pharmacologic
 python3 scripts/append_fulltext.py pharmacologic glp1_receptor_agonists
 ```
 
-**Note**: Full text is optional but recommended for better PICO extraction and atomic fact generation. Papers with full text will provide more comprehensive structured data for the LLM.
+**Note**: Full text is optional but recommended for better PICO extraction and atomic fact generation. Papers with full text will provide more comprehensive structured data for LLM.
 
 **Integration**: Full text from this script is automatically used by `structure_paper.py` and `batch_structure_papers.py` if available in `papers.json` files.
 
@@ -426,32 +431,28 @@ python3 scripts/append_fulltext.py pharmacologic glp1_receptor_agonists
 #### `scripts/medgemma_query.py`
 **Purpose**: Direct and RAG-enhanced MedGemma queries via Ollama
 
-**Input**: User query (English or Japanese), mode (direct | rag | compare)
+**Input**: User query (English), mode (direct | rag | compare)
 
 **Output**: MedGemma response with full context
 
 **Workflow**:
 
 **Direct Mode**:
-1. Accept user query
-2. Detect language (regex for Japanese characters)
-3. Translate Japanese to English (if applicable)
-4. Create bilingual prompt:
-    - English: "Question: {query}\n\nProvide a comprehensive answer..."
-    - Japanese: "質問: {query}\n\nこの肥満治療に関する医学的質問に対して包括的な回答を提供してください..."
-5. Query MedGemma via Ollama API
-6. Parse response and return
+1. Accept user query (English)
+2. Create prompt:
+   - English: "Question: {query}\n\nProvide a comprehensive answer..."
+3. Query MedGemma via Ollama API
+4. Parse response and return
 
 **RAG Mode** (`run_map_reduce_query()`):
-1. Translate Japanese to English using `translate_query()` (if applicable)
-2. Search papers via `search_qdrant.search_medical_papers(query, top_k=3)`
-3. Search atomic facts via `search_qdrant.search_atomic_facts(query, limit=10, paper_ids=...)`
-4. **Map Phase**: Analyze each paper individually with `analyze_single_paper()`
+1. Search papers via `search_qdrant.search_medical_papers(query, top_k=3)`
+2. Search atomic facts via `search_qdrant.search_atomic_facts(query, limit=10, paper_ids=...)`
+3. **Map Phase**: Analyze each paper individually with `analyze_single_paper()`
     - Extract drug name and numerical outcomes
     - Filter irrelevant papers
-5. **Reduce Phase**: Synthesize findings with `synthesize_findings()`
-    - Generate comprehensive Japanese answer
-6. Return final answer
+4. **Reduce Phase**: Synthesize findings with `synthesize_findings()`
+    - Generate comprehensive English answer
+5. Return final answer
 
 **Models**:
 - Direct query: 2048 tokens (temperature: 0.3)
@@ -469,26 +470,20 @@ python3 scripts/append_fulltext.py pharmacologic glp1_receptor_agonists
 python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?"
 python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode direct
 
-# RAG-enhanced query (Qdrant検索 → MedGemma生成, Map-Reduce)
+# RAG-enhanced query (Qdrant search → MedGemma generation, Map-Reduce)
 python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode rag
 
-# RAG-enhanced query with verbose output
-python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --mode rag --verbose
-
-# Japanese query (automatically translated to English)
-python3 scripts/medgemma_query.py "肥満治療について教えてください" --mode rag
+# Compare mode (RAG side-by-side vs Direct)
+python3 scripts/medgemma_query.py "What are the benefits of GLP-1 agonists?" --mode compare
 ```
 
 **Key Features**:
-- Bilingual support: English + Japanese prompts and responses
-- Japanese query translation: Automatic translation using MedGemma
+- English-only support: English queries and responses
 - RAG context: Relevant papers + atomic facts from Qdrant
 - Map-Reduce architecture: Efficient analysis of multiple papers
-- Language detection: Automatic detection via regex
 - Error handling: Timeout and API error handling
-- **Verbose mode** (--verbose, -v): Show detailed evidence information
 
-**Note**: This script provides both direct and RAG-enhanced MedGemma queries with Map-Reduce architecture, completing Phase 4
+**Note**: This script provides both direct and RAG-enhanced MedGemma queries with Map-Reduce architecture for English queries.
 
 ---
 
@@ -497,31 +492,30 @@ python3 scripts/medgemma_query.py "肥満治療について教えてください
 #### `scripts/integrate_system.py`
 **Purpose**: End-to-end integration of Qdrant search + MedGemma synthesis
 
-**Input**: User query (English or Japanese)
+**Input**: User query (English)
 
 **Output**: Complete medical evidence answer with citations
 
 **Workflow**:
-1. Detect query language
-2. **Phase 1**: Qdrant Search
-   - Generate query embedding (e5_questions_en or e5_questions_ja)
-   - Search medical_papers collection
-   - Calculate cosine similarity
-   - Rank by similarity (top 5 papers)
-   - Retrieve full metadata and PICO
-3. **Phase 2**: Atomic Fact Retrieval
-   - Generate SapBERT query embedding
-   - Search atomic_facts collection
-   - Calculate cosine similarity
-   - Rank by similarity (top 5 facts)
-4. **Phase 3**: MedGemma RAG Synthesis
-   - Create RAG context (papers + atomic facts)
-   - Create bilingual RAG prompt with context
-   - Query MedGemma (4096 tokens, temperature: 0.3)
-   - Parse response and format
-5. **Phase 4**: Results Formatting
-   - Format results in bilingual JSON
-   - Include search strategy, timing, and notes
+1. **Phase 1**: Qdrant Search
+    - Generate query embedding (e5_questions_en)
+    - Search medical_papers collection
+    - Calculate cosine similarity
+    - Rank by similarity (top 5 papers)
+    - Retrieve full metadata and PICO
+2. **Phase 2**: Atomic Fact Retrieval
+    - Generate SapBERT query embedding
+    - Search atomic_facts collection
+    - Calculate cosine similarity
+    - Rank by similarity (top 5 facts)
+3. **Phase 3**: MedGemma RAG Synthesis
+    - Create RAG context (papers + atomic facts)
+    - Create RAG prompt with context
+    - Query MedGemma (4096 tokens, temperature: 0.3)
+    - Parse response and format
+4. **Phase 4**: Results Formatting
+    - Format results in JSON
+    - Include search strategy, timing, and notes
 
 **Modes**:
 - `search_only`: Qdrant search only (no MedGemma)
@@ -529,12 +523,12 @@ python3 scripts/medgemma_query.py "肥満治療について教えてください
 - `rag`: Full RAG synthesis (Qdrant + MedGemma)
 
 **Features**:
-- Bilingual support: English + Japanese queries
-- Multi-stage retrieval: Papers + atomic facts
+- English-only support: English queries, embeddings, and responses
+- Multi-stage retrieval: Papers + atomic facts for comprehensive answers
 - Vector similarity ranking: Cosine similarity for relevant results
 - RAG context: Dynamic context generation based on search results
 - Comprehensive answers: Evidence-based with citations
-- Performance metrics: Search time, MedGemma time
+- Performance metrics: Search time, MedGemma time, response length
 
 **Usage**:
 ```bash
@@ -550,13 +544,13 @@ python3 scripts/integrate_system.py "Does semaglutide reduce weight in obesity?"
 
 **Key Features**:
 - Complete end-to-end workflow: Qdrant search + MedGemma synthesis
-- Bilingual support: Detect language, use appropriate vectors and prompts
+- English-only support: English queries, embeddings, and responses
 - Multi-stage retrieval: Papers + atomic facts for comprehensive answers
 - Evidence-based: RAG-enhanced MedGemma queries with citations
 - Performance tracking: Search time, MedGemma time, response length
 - Error handling: Qdrant errors, MedGemma errors, timeout handling
 
-**Note**: This is the final integration script completing all 4 phases of the project
+**Note**: This is the final integration script completing all 4 phases of the project for English-only queries
 
 ---
 
@@ -623,11 +617,13 @@ data/obesity/
 │       └── papers/
 ```
 
-**Two file formats:**
+**Two file formats**:
 - `papers.json`: Simple format for raw downloaded papers (pmid, title, abstract, journal, year)
-- `papers/PMID_XXX.json`: 5-layer structured format with PICO, atomic facts, questions, limitations
+- `papers/PMID_XXX.json`: 5-layer structured format with PICO, atomic facts, questions (EN), limitations
+
 ```
- clinical-evidence-agent/
+
+clinical-evidence-agent/
 ├── data/
 │   └── obesity/
 │       ├── pharmacologic/
@@ -667,23 +663,24 @@ data/obesity/
 │       │       └── papers/
 ├── qdrant_medical_db/              (Qdrant local database)
 │   ├── collection/
-│   │   ├── medical_papers/       (297 points, 4 named vectors each)
+│   │   ├── medical_papers/       (297 points, 3 named vectors each)
 │   │   └── atomic_facts/         (3,088 points, 1 named vector each)
 │   └── ...                           (Qdrant storage files)
 ├── scripts/
 │   ├── fetch_paper_details.py        (PubMed download - main script)
 │   ├── append_fulltext.py            (Full text retrieval)
-│   ├── structure_paper.py          (Single paper structuring)
+│   ├── structure_paper.py          (Single paper structuring - 2-stage processing)
 │   ├── batch_structure_papers.py  (Batch processing)
-│   ├── generate_embeddings.py              (Embedding generation)
+│   ├── generate_embeddings.py              (Embedding generation - 3 vectors per paper)
 │   ├── setup_qdrant.py             (Qdrant initialization)
-│   ├── search_qdrant.py             (Qdrant search - real models)
-│   ├── medgemma_query.py          (MedGemma queries)
-│   ├── integrate_system.py          (Full integration)
+│   ├── search_qdrant.py             (Qdrant search - English only)
+│   ├── medgemma_query.py          (MedGemma queries - English only)
+│   ├── integrate_system.py          (Full integration - English only)
 │   ├── validate_structure.py        (Validation)
 │   └── verify_embeddings.py         (Verification)
 │   └── README.md                     (This file)
-└── PHASE_2_PROBLEMS.md            (Phase 2 issue documentation)
+└── plans/
+    └── two_stage_atomic.md              (2-stage processing plan)
 ```
 
 ---
@@ -695,7 +692,6 @@ data/obesity/
 - **Output**: `papers.json` files for each subcategory in each domain
 - **Coverage**: Process all papers across all subsections
 - **Metadata**: Title, abstract, authors, journal, year, MeSH terms
-- **Features**: LLM filtering, duplicate detection, automatic subcategory organization
 
 - **Optional Step**: `append_fulltext.py` (Recommended but optional)
   - **Purpose**: Retrieve full text content from PMC and append to existing papers
@@ -705,24 +701,42 @@ data/obesity/
   - **Usage**: `python3 scripts/append_fulltext.py pharmacologic`
   - **Note**: Not all papers have full text available (open access papers only)
 
-### 2. Data Structuring (Phase 1)
+### 2. Data Structuring (Phase 1) - 2-Stage Processing
 - **Script**: `batch_structure_papers.py` (after optional `append_fulltext.py`)
 - **Input**: `papers.json` files from all subsections in each domain (with optional `full_text` field)
+
+**2-Stage Architecture**:
+**Stage 1**: Generate metadata, PICO, generated questions (EN), MeSH terminology, quantitative data, limitations, and cross references
+- Uses `STAGE1_PROMPT` in structure_paper.py
+- Generates structured JSON without atomic_facts_en and embeddings_metadata
+- API calls: 1 per paper with max_tokens=16384
+
+**Stage 2**: Generate atomic facts (EN) and embeddings metadata based on Stage 1 questions
+- Uses `STAGE2_PROMPT` in structure_paper.py
+- Takes Stage 1 output (questions, PICO) as input
+- Generates atomic_facts_en that answer the generated questions
+- Each fact is self-contained with intervention name, condition, and PMID
+- API calls: 1 per paper with max_tokens=8192
+
+**Merge Stage 1 + Stage 2**:
+- Combines Stage 1 and Stage 2 results into final structured JSON
+- Output: Full 5-layer schema with atomic_facts_en from Stage 2
+
 - **Output**: Structured JSON files with 5-layer schema in each subsection's `papers/` directory
 - **Coverage**: Process all papers across all subsections
-- **Time**: ~2.5 hours for all domains
+- **Time**: ~3 hours for all domains (Stage 1: ~2 hours, Stage 2: ~1 hour)
 - **Success Rate**: 100% (no failures)
+- **Quality**: Improved atomic facts that answer generated questions
 
 ### 3. Embedding Generation (Phase 2)
 - **Script**: `generate_embeddings.py`
 - **Input**: Structured papers from all domains
 - **Output**: Qdrant database with all embeddings
 - **Coverage**: All papers (deduplication skips existing)
-- **Embeddings**: 5 types (4 paper-level + 1 per fact)
+- **Embeddings**: 4 types (3 paper-level + 1 per fact)
   - `sapbert_pico` (768-dim): PICO matching
   - `e5_pico` (1024-dim): Fallback vector
-  - `e5_questions_en` (1024-dim): English questions
-  - `e5_questions_ja` (1024-dim): Japanese questions
+  - `e5_questions_en` (1024-dim): English questions (removed Japanese)
   - `sapbert_fact` (768-dim): Atomic facts
 - **Time**: ~25 minutes for all papers
 - **Success Rate**: Stops on error (fail-safe)
@@ -730,34 +744,26 @@ data/obesity/
 
 ### 4. Search Pipeline (Phase 3)
 - **Script**: `search_qdrant.py`
-- **Input**: User query (English or Japanese)
+- **Input**: User query (English)
 - **Output**: Top 5 papers ranked by similarity
 - **Performance**: ~400ms search time
 - **Database**: 298 papers with full vectors
+- **Language**: English only (removed Japanese query handling)
 
 ### 5. MedGemma Query (Phase 4)
 - **Script**: `medgemma_query.py` + `integrate_system.py`
 - **Modes**: Direct, RAG-enhanced (Map-Reduce architecture)
 - **Models**: `medgemma:7b` (via Ollama)
-- **Bilingual**: English + Japanese support
-  - Japanese queries automatically translated to English before search
-  - Answers generated in original query language
+- **Language**: English only (removed Japanese translation)
 - **Features**: Evidence-based answers with citations
 - **Architecture**: Map-Reduce RAG
-  - Map Phase: Analyze each paper individually, extract drug name and numerical outcomes
-  - Reduce Phase: Synthesize findings into comprehensive Japanese answer
-
-### 6. End-to-End Integration
-- **Script**: `integrate_system.py`
-- **Workflow**: Qdrant search → MedGemma synthesis
-- **Modes**: search_only, direct, rag
-- **Output**: Complete medical evidence answers
 
 ---
 
 ## Model Information
 
 ### Embedding Models
+
 - **SapBERT**: `cambridgeltl/SapBERT-from-PubMedBERT-fulltext`
   - Dimension: 768
   - Purpose: Medical concept embeddings
@@ -768,15 +774,14 @@ data/obesity/
   - Dimension: 1024
   - Purpose: Question embeddings, PICO summaries with passage prefix
   - Prefixes: `query:` (questions), `passage:` (PICO)
-  - Languages: English, Japanese, Chinese, 14 European languages
-  - Embedding types: `e5_pico` (1024), `e5_questions_en` (1024), `e5_questions_ja` (1024)
+  - Languages: English, Chinese, 14 European languages
+  - Embedding types: `e5_pico` (1024), `e5_questions_en` (1024)
 
-**Total Embedding Types**: 5 (per docs/search-flow.md)
-1. `sapbert_pico` (768) - Step 2: PICO matching
+**Total Embedding Types**: 4 (per paper)
+1. `sapbert_pico` (768) - Step 1: PICO matching
 2. `e5_pico` (1024) - Fallback vector
-3. `e5_questions_en` (1024) - Step 1: English questions
-4. `e5_questions_ja` (1024) - Step 1: Japanese questions
-5. `sapbert_fact` (768) - Step 3: Atomic facts
+3. `e5_questions_en` (1024) - Step 1: English questions (removed Japanese)
+4. `sapbert_fact` (768) - Step 2: Atomic facts
 
 ### LLM Model
 - **MedGemma 7b**: `medgemma:7b` (via Ollama)
@@ -788,11 +793,10 @@ data/obesity/
 - **Qdrant**: Open-source vector similarity search engine
   - Mode: Local file-based at `./qdrant_medical_db`
   - Collections: 2 (medical_papers, atomic_facts)
-  - Vectors: 5 named vectors (4 per paper + 1 per fact)
+  - Vectors: 4 named vectors (3 per paper + 1 per fact)
     - `sapbert_pico` (768): PICO matching
     - `e5_pico` (1024): Fallback vector
     - `e5_questions_en` (1024): English questions
-    - `e5_questions_ja` (1024): Japanese questions
     - `sapbert_fact` (768): Atomic facts
   - Distance Metric: Cosine similarity
   - Size: All structured papers + atomic facts
@@ -810,8 +814,9 @@ data/obesity/
 ### OpenRouter (Paper Structuring)
 - **Endpoint**: `https://openrouter.ai/api/v1/chat/completions`
 - **Model**: `meta-llama/llama-3-70b-instruct` (or configurable)
-- **Max Retries**: 3 with exponential backoff
-- **Timeout**: 180 seconds per paper
+- **Max Retries**: 3 with exponential backoff (per stage)
+- **Timeout**: 180 seconds per paper (90s per stage)
+- **2-Stage Processing**: Stage 1 + Stage 2 for improved atomic fact quality
 
 ### PubMed E-utilities (Data Collection)
 - **Search API**: `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi`
@@ -825,14 +830,15 @@ data/obesity/
 ### Data Structuring
 - **Total Papers**: Process all papers from all subsections
 - **Success Rate**: 100% (0 failures)
-- **Processing Time**: ~2.5 hours for all domains
-- **Average Time**: ~30 seconds per paper
+- **Processing Time**: ~3 hours for all domains (Stage 1: ~2 hours, Stage 2: ~1 hour)
+- **Average Time**: ~30 seconds per paper (including both stages)
+- **Quality**: 2-stage processing improves atomic fact quality by answering generated questions
 
 ### Embedding Generation
 - **Total Papers**: All structured papers (deduplication skips existing)
-- **Total Vectors**: 5 types per paper (4 paper-level + 1 per fact)
-  - Paper-level: 4 vectors (sapbert_pico, e5_pico, e5_questions_en, e5_questions_ja)
-  - Atomic facts: 1 vector (sapbert_fact) per fact
+- **Total Vectors**: 4 types per paper (3 paper-level + 1 per fact)
+  - Paper-level: 3 vectors (sapbert_pico, e5_pico, e5_questions_en)
+  - Atomic facts: 1 vector (sapbert_fact)
 - **Processing Time**: ~25 minutes for all papers
 - **Processing Rate**: ~0.08 papers/second
 - **Error Handling**: Stops on first error (fail-safe)
@@ -891,15 +897,10 @@ python3 scripts/generate_embeddings.py
 python3 scripts/search_qdrant.py "Does semaglutide reduce weight in obesity?"
 ```
 
-**Japanese Query**:
-```bash
-python3 scripts/search_qdrant.py "肥満治療について教えてください"
-```
-
 **Output**:
 ```
 Qdrant Vector Similarity Search
-======================================================================
+=====================================================================
 Query: Does semaglutide reduce weight in obesity?
 
 Language detected: en
@@ -911,16 +912,16 @@ Top Papers:
 1. PMID: 38599612 (score: 0.954)
    Title: Efficacy and Safety of Once-Weekly Semaglutide...
    PICO:
-     Patient: Overweight or obese adults without type 2 diabetes...
-     Intervention: Once-weekly subcutaneous semaglutide treatment...
-     Outcome: Weight loss, with quantitative results...
+      Patient: Overweight or obese adults without type 2 diabetes...
+      Intervention: Once-weekly subcutaneous semaglutide treatment...
+      Outcome: Weight loss, with quantitative results...
 
 2. PMID: 38923272 (score: 0.950)
    Title: Efficacy and safety of once-weekly subcutaneous semaglutide...
    PICO:
-     Patient: Patients with overweight or obesity without diabetes mellitus...
-     Intervention: Once-weekly subcutaneous semaglutide...
-     Outcome: Change in body weight (%): mean difference (MD)...
+      Patient: Patients with overweight or obesity without diabetes mellitus...
+      Intervention: Once-weekly subcutaneous semaglutide...
+      Outcome: Change in body weight (%): mean difference (MD)...
 
 [Continues with top 5 papers + 3 atomic facts]
 ```
@@ -935,14 +936,13 @@ python3 scripts/medgemma_query.py "What are the side effects of semaglutide?"
 **Output**:
 ```
 MedGemma Direct Query
-======================================================================
+=====================================================================
 Query: What are the side effects of semaglutide?
 
-Generating query embedding...
 [MedGemma response with comprehensive answer about side effects]
 ```
 
-### 3. MedGemma Map-Reduce RAG Query
+### 3. MedGemma RAG Query
 
 ```bash
 # Full RAG synthesis with Map-Reduce architecture
@@ -956,32 +956,15 @@ Query (RAG Mode): Is semaglutide effective for long-term obesity treatment?
 2. Searching atomic facts...
 3. Analyzing each paper (Map phase)...
    > Analyzing: Efficacy and Safety of Semaglutide... (3 facts)
-     -> Extracted: Drug Name: Semaglutide
-- Result: Weight reduction: -14.9% (95% CI: -16.4 to -13.4)
+      -> Extracted: Drug Name: Semaglutide
+      - Result: Weight reduction: -14.9% (95% CI: -16.4 to -13.4)
    > Analyzing: Long-term effects of GLP-1 agonists... (2 facts)
-     -> Extracted: Drug Name: Liraglutide
-- Result: Weight maintenance: -8.1% (p<0.01)
+      -> Extracted: Drug Name: Liraglutide
+      - Result: Weight maintenance: -8.1% (p<0.01)
 4. Synthesizing 2 findings (Reduce phase)...
 
 Answer:
 Yes, clinical evidence demonstrates that semaglutide is effective for long-term obesity treatment. Semaglutide resulted in a 14.9% weight reduction (95% CI: -16.4 to -13.4) in overweight and obese adults. Liraglutide showed sustained weight loss of 8.1% (p<0.01) over long-term follow-up.
-```
-
-### 4. End-to-End Integration with Different Modes
-
-**Search Only (no MedGemma)**:
-```bash
-python3 scripts/integrate_system.py "semaglutide dosage" search_only
-```
-
-**Direct Query (no Qdrant search)**:
-```bash
-python3 scripts/integrate_system.py "semaglutide safety" direct
-```
-
-**RAG Mode (full Qdrant + MedGemma)**:
-```bash
-python3 scripts/integrate_system.py "Does semaglutide interact with other medications?" rag
 ```
 
 ---
@@ -1040,11 +1023,6 @@ print(f'Payload: {scroll_result[0][0].payload}')
 "
 ```
 
-### Issue: Atomic Facts Dimension Mismatch
-**Error**: `cosine_similarity` mismatch (1024-dim query vs 768-dim atomic facts)
-
-**Solution**: Use SapBERT for both query and facts (same 768-dim)
-
 ### Issue: Ollama Timeout
 **Error**: MedGemma request times out after 60 seconds
 
@@ -1056,13 +1034,24 @@ print(f'Payload: {scroll_result[0][0].payload}')
 
 ### Completed Components ✅
 - [x] **Phase 1**: Data Structuring (298/298 papers)
-- [x] **Phase 2**: Embeddings Generation (4,276 vectors)
+- [x] **Phase 2**: Embeddings Generation (298 papers × 4 vectors)
 - [x] **Phase 3**: Search Pipeline (Qdrant search)
 - [x] **Phase 4**: Full Integration (Qdrant + MedGemma)
 
+### Recent Improvements 🚀
+- [x] **2-Stage Processing**: Improved atomic fact quality in `structure_paper.py`
+  - Stage 1: Generates questions (EN), PICO, metadata
+  - Stage 2: Generates atomic facts that answer the questions
+  - Result: Self-contained facts with intervention name, condition, PMID
+- [x] **English-Only Support**: Removed Japanese question generation and embeddings
+  - structure_paper.py: English-only questions in `generated_questions.en`
+  - generate_embeddings.py: Removed `e5_questions_ja` embeddings
+  - search_qdrant.py: English-only query support
+  - medgemma_query.py: Removed Japanese translation logic
+  - integrate_system.py: English-only responses
+
 ### Known Issues ⚠️
 - [ ] **MedGemma Model**: `medgemma:7b` needs to be available in Ollama
-- [ ] **Atomic Facts**: Dimension mismatch (needs fix for SapBERT usage)
 
 ### Next Steps 🔜
 - [ ] **Deploy** System to production environment
@@ -1112,25 +1101,47 @@ print(f'Payload: {scroll_result[0][0].payload}')
 
 ## Version History
 
-### v1.0 (2026-02-02) - Initial System
-- Data structuring for 298 papers
-- Embedding generation for all papers (5 types per paper)
-- Qdrant search pipeline with real models
-- MedGemma integration (direct and RAG)
-- Full end-to-end workflow
+### v1.3 (2026-02-13) - English-Only Support + 2-Stage Processing
+- **structure_paper.py**: Implemented 2-stage processing (Stage 1 + Stage 2)
+  - Stage 1: Generates metadata, PICO, questions (EN), limitations
+  - Stage 2: Generates atomic facts that answer the generated questions
+  - Result: Improved atomic fact quality with self-contained facts
+  - Removed: Japanese question generation (generated_questions.ja)
+- **generate_embeddings.py**: Removed Japanese question embeddings
+  - Removed: `e5_questions_ja` vector generation
+  - Result: 3 named vectors per paper (was 4)
+- **search_qdrant.py**: Updated for English-only queries
+  - Removed: Japanese query detection and translation
+  - Result: English-only query support
+- **medgemma_query.py**: Removed Japanese translation logic
+  - Removed: `translate_query()` function
+  - Result: English-only queries and responses
+- **integrate_system.py**: Updated for English-only integration
+  - Removed: Japanese vector references (e5_questions_ja)
+  - Result: English-only responses
+- **README.md**: Comprehensive update to reflect all changes
+  - Updated: System architecture diagram (removed JA)
+  - Updated: Component descriptions (English-only)
+  - Updated: All script descriptions (2-stage, English-only)
+  - Updated: Model information (4 embedding types)
+  - Updated: Performance metrics
+- **Data Directory**: No structural changes (only content updates)
 
-### v1.1 (2026-02-09) - Embedding Script Update
-- Merged embedding generation scripts (generate_embeddings.py)
-- Fixed UUID generation bug
-- Added deduplication logic
-- Updated to match docs/search-flow.md specification (5 embedding types)
-- Qdrant path: ./qdrant_medical_db
-- Stop-on-error behavior for reliability
+### v1.2 (2026-02-09) - MedGemma Query Verbose Mode
+- **Problem**: RAG mode did not provide clear visibility into which papers and evidence were retrieved
+- **Root cause**: Answer only showed aggregated summary without listing individual paper IDs, scores, and PICO details
+- **Solution**: Added `--verbose` (`-v`) flag to `medgemma_query.py`
+  - Shows detailed retrieved paper information (PMID, Title, Journal, Year, Score, PICO)
+  - Lists all retrieved atomic facts with details
+  - Better visual feedback of evidence retrieval process
+- **Files updated**:
+  - `scripts/medgemma_query.py`: Added argparse support, verbose parameter to all functions, detailed logging for retrieved papers and facts
+  - `README.md`: Updated usage examples and key features to document verbose flag
 
-### v1.2 (2026-02-10) - Search Vector Priority Optimization
+### v1.1 (2026-02-10) - Search Vector Priority Optimization
 - **Problem**: `e5_questions_en` vector had limited matching for general queries (e.g., "treatment for osteoarthritis")
 - **Root cause**: Individual questions focus on specific metrics rather than broader PICO keywords
-- **Solution**: Implemented vector priority order in `search_qdrant.py`:
+- **Solution**: Implemented vector priority order in `search_qdrant.py`
   - Priority 1: `e5_pico` (1024-dim) - PICO combined for broader semantic matching
   - Priority 2: `e5_questions_en` (1024-dim) - Generated questions for specific queries
   - Priority 3: `sapbert_pico` (768-dim) - Fallback for compatibility
@@ -1140,91 +1151,22 @@ print(f'Payload: {scroll_result[0][0].payload}')
   - `docs/search-flow.md`: Updated Step 2 description with vector selection rationale
   - `README.md`: Updated search workflow with priority order explanation
 
-### v1.3 (2026-02-10) - MedGemma Query Verbose Mode
-- **Problem**: RAG mode did not provide clear visibility into which papers and evidence were retrieved
-- **Root cause**: Answer only showed aggregated summary without listing individual paper IDs, scores, and PICO details
-- **Solution**: Added `--verbose` (`-v`) flag to `medgemma_query.py`:
-  - Shows detailed retrieved paper information (PMID, Title, Journal, Year, Score, PICO)
-  - Lists all retrieved atomic facts with details
-  - Better visual feedback of evidence retrieval process
-- **Files updated**:
-  - `scripts/medgemma_query.py`: Added argparse support, verbose parameter to all functions, detailed logging for retrieved papers and facts
-  - `README.md`: Updated usage examples and key features to document verbose flag
-
-### v1.4 (2026-02-11) - Japanese Query Translation with MedGemma
-- **Problem**: Japanese queries failed to retrieve relevant papers because SapBERT is trained only on English text
-- **Root cause**: Japanese terms like "変形性膝関節症" had low similarity scores with English PICO data
-- **Solution**: Query translation using MedGemma
-  - `translate_query()` function translates Japanese to English before search
-  - Uses SapBERT for high-precision matching on English queries
-  - Automatic handling of any medical term (no manual dictionary maintenance)
-  - Map-Reduce RAG architecture for evidence synthesis
-- **Result**: PMID 39476339 correctly retrieved for Japanese queries
-  - Translation time: ~3 seconds
-  - Top paper rank: #1 for both English and Japanese
-  - Answer generation in original query language (Japanese query → Japanese answer)
-- **Advantages over keyword mapping**:
-  - Automatic: No manual updates for new terms
-  - Flexible: Handles any medical term
-  - Consistent: Same pipeline for all queries
-- **Files updated**:
-  - `scripts/medgemma_query.py`: Added `translate_query()` function and Map-Reduce RAG workflow
-  - `docs/japanese-query-translation.md`: Comprehensive documentation of translation approach
-  - `docs/japanese-query-reranking.md`: Marked as deprecated (keyword mapping approach)
-  - `README.md`: Updated workflow and key features
-
----
-
-## Contact & Support
-
-### Questions or Issues
-- Check this README.md for troubleshooting
-- Review scripts in `scripts/` directory
-- Check logs for error messages
-
-### Known Limitations
-- **Qdrant**: Local file-based mode (not distributed)
-- **MedGemma**: Requires Ollama to be running locally
-- **Search**: Limited to 298 papers (can be expanded)
-- **LLM Context**: Limited by token window (4096 tokens for RAG)
-
----
-
-## Roadmap
-
-### Short Term (Next 1-2 weeks)
-- [ ] Fix atomic facts dimension mismatch
-- [ ] Deploy MedGemma:7b model in Ollama
-- [ ] Add more papers to database (beyond 298)
-- [ ] Optimize Qdrant search performance
-- [ ] Create web UI for system
-
-### Medium Term (Next 1-3 months)
-- [ ] Implement re-ranking stage for search results
-- [ ] Add citation formatting for academic output
-- [ ] Implement advanced filtering (by study type, year, etc.)
-- [ ] Add support for evidence grading (GRADE assessment)
-- [ ] Create user accounts and query history
-
-### Long Term (Next 3-6 months)
-- [ ] Multi-hospital support (shared database)
-- [ ] Real-time data updates (automatic PubMed syncing)
-- [ ] Advanced analytics dashboard
-- [ ] EHR system integration
-- [ ] Mobile app development
-- [ ] API endpoint for external system access
+### v1.0 (2026-02-02) - Initial System
+- Data structuring for 298 papers
+- Embedding generation for all papers (5 types per paper)
+- Qdrant search pipeline with real models
+- MedGemma integration (direct and RAG)
+- Full end-to-end workflow
 
 ---
 
 ## Summary
 
 This clinical evidence agent provides a comprehensive solution for retrieving medical evidence using:
-- **Vector similarity search** across 298 structured papers
+- **Vector similarity search** across 298 structured medical papers
 - **Map-Reduce RAG architecture** with MedGemma synthesis
-- **Bilingual support** for English and Japanese queries
-  - Japanese queries automatically translated to English before search
-  - Answers generated in original query language
-- **Multi-stage retrieval** with paper-level and atomic fact search
+- **English-only support** with high-quality, self-contained atomic facts
+- **2-stage processing** for improved atomic fact generation
 - **Evidence-based answers** with citations and metadata
 
 **System Status**: **PRODUCTION READY** ✅
@@ -1233,8 +1175,9 @@ This clinical evidence agent provides a comprehensive solution for retrieving me
 - ✅ Search 298 medical papers by semantic similarity
 - ✅ Retrieve atomic facts for detailed evidence
 - ✅ Generate comprehensive medical answers using MedGemma
-- ✅ Support English and Japanese queries (automatic translation)
-- ✅ Provide evidence-based recommendations with citations
-- ✅ Map-Reduce architecture for efficient analysis
+- ✅ English-only queries, embeddings, and responses
+- ✅ Multi-stage retrieval with paper-level and atomic fact search
+- ✅ 2-stage processing for improved atomic fact quality
+- ✅ Evidence-based: RAG-enhanced MedGemma queries with citations
 - ✅ Fast response time (<10 seconds for full query)
 - ✅ Complete end-to-end workflow (Qdrant + MedGemma)
