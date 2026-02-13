@@ -37,3 +37,14 @@ start.sh
 
 # Plans (documentation only)
 plans/
+
+# --- 追加する設定 ---
+# Backend関連ファイルを除外
+app.py
+scripts/
+requirements.txt
+Dockerfile  # 既存のバックエンドDockerfile
+
+# テスト・ドキュメントを除外
+hello-flask/
+history/

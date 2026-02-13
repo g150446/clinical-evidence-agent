@@ -1,0 +1,29 @@
+HTTP:8080でFlaskを起動します...
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.59:8080
+[33mPress CTRL+C to quit[0m
+No sentence-transformers model found with name cambridgeltl/SapBERT-from-PubMedBERT-fulltext. Creating a new one with mean pooling.
+127.0.0.1 - - [13/Feb/2026 09:37:52] "HEAD /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:38:02] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:38:10] "HEAD /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:38:10] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:39:08] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:39:14] "OPTIONS /api/query HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 09:39:14] "POST /api/query HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 10:18:02] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 10:18:13] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 10:18:17] "[33mGET /config.js HTTP/1.1[0m" 404 -
+127.0.0.1 - - [13/Feb/2026 10:18:22] "[33mGET /js/lkk_ch.js HTTP/1.1[0m" 404 -
+127.0.0.1 - - [13/Feb/2026 10:18:25] "[33mGET /css/support_parent.css HTTP/1.1[0m" 404 -
+127.0.0.1 - - [13/Feb/2026 10:27:08] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
+127.0.0.1 - - [13/Feb/2026 10:27:08] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
+127.0.0.1 - - [13/Feb/2026 10:27:09] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 11:08:31] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 11:08:31] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 11:13:45] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 11:14:06] "OPTIONS /api/query HTTP/1.1" 200 -
+127.0.0.1 - - [13/Feb/2026 11:14:06] "POST /api/query HTTP/1.1" 200 -

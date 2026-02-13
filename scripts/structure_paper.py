@@ -143,8 +143,8 @@ Return valid JSON in this exact format:
       "outcome": "Primary outcome with quantitative results, 95% CI, p-value"
     }},
     "atomic_facts_en": [
-      "Fact 1 with quantitative data",
-      "Fact 2 with statistical significance",
+      "Self-contained fact 1: must include intervention name, condition, PMID, and quantitative data (e.g., 'Semaglutide 2.4mg reduced body weight by 13.7% vs 3.2% with placebo in adults with obesity and knee osteoarthritis (PMID_39476339).')",
+      "Self-contained fact 2: each fact independently understandable without reading other facts",
       ...
     ],
     "quantitative_data": {{
@@ -221,6 +221,17 @@ Rules for each layer:
 
 **Layer B: Atomic Facts (English only)**
 - Create 10-20 facts, each 1 sentence with 1 verifiable fact
+- CRITICAL: Each fact must be SELF-CONTAINED and understandable WITHOUT any other context
+  - NEVER start with "The study", "The participants", "The trial", "The authors" as the sole subject
+  - ALWAYS include: (1) the specific intervention name and dosage, (2) the condition/population, and (3) the PMID
+  - Each fact must pass the "isolation test": reading ONLY that one sentence, the reader must know WHAT study, WHAT intervention, WHAT population, and WHAT was measured
+- Examples:
+  - BAD:  "The mean age of participants was 56 years."
+  - GOOD: "In the semaglutide 2.4mg trial for obesity with knee osteoarthritis (PMID_39476339), the mean age of participants was 56 years."
+  - BAD:  "The reduction was statistically significant (p<0.001)."
+  - GOOD: "The body weight reduction with semaglutide 2.4mg vs placebo was statistically significant (p<0.001) in the 68-week RCT (PMID_39476339)."
+  - BAD:  "Gastrointestinal disorders were the most common reason for discontinuation."
+  - GOOD: "Gastrointestinal disorders were the most common reason for discontinuation in the semaglutide 2.4mg group in the obesity/knee osteoarthritis trial (PMID_39476339)."
 - Include quantitative data and statistical significance
 - Separate author claims from observed facts
 
@@ -338,7 +349,7 @@ def structure_paper(paper_data, max_retries=3):
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a medical research expert. Return only valid JSON."},
+                    {"role": "system", "content": "You are a medical research expert. Return only valid JSON. IMPORTANT: Every atomic_facts_en entry must be a fully self-contained sentence that includes the intervention name, condition, and PMID. Never use 'The study' or 'The participants' without specifying which study."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.1,  # Low temperature for consistency

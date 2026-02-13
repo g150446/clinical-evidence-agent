@@ -5,6 +5,7 @@ Flask server for querying MedGemma via browser (direct, RAG, compare modes)
 """
 
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
+from flask_cors import CORS
 import sys
 import os
 import json
@@ -18,6 +19,7 @@ sys.path.insert(0, SCRIPTS_DIR)
 os.chdir(PROJECT_ROOT)
 
 app = Flask(__name__)
+CORS(app)
 
 OLLAMA_URL = 'http://localhost:11434/api/generate'
 OLLAMA_MODEL = 'medgemma'
@@ -239,4 +241,6 @@ def query():
 
 
 if __name__ == '__main__':
+    # 本番環境: HTTP:8080で起動（Tailscale Funnel proxy経由）
+    print("HTTP:8080でFlaskを起動します...")
     app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
