@@ -109,7 +109,13 @@ def process_paper(paper_path):
             print(f"  ! Missing multilingual_interface in {paper_id}")
             return False, None, None, 0
         
-        questions_en = paper['multilingual_interface'].get('generated_questions', {}).get('en', [])
+        generated_questions = paper['multilingual_interface'].get('generated_questions', {})
+        if isinstance(generated_questions, list):
+            questions_en = generated_questions          # flat list — already English strings
+        elif isinstance(generated_questions, dict):
+            questions_en = generated_questions.get('en', [])
+        else:
+            questions_en = []
         
         # 1. SapBERT PICO embedding (768 dim)
         pico_combined = f"{pico.get('patient', '')} {pico.get('intervention', '')} {pico.get('comparison', '')} {pico.get('outcome', '')}"
