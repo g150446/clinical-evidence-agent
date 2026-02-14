@@ -3,15 +3,10 @@
 ## Overview
 
 An intelligent medical evidence retrieval system combining:
-- **Qdrant Vector Database**: Semantic search across 298 structured medical papers
+- **Qdrant Vector Database**: Semantic search across structured medical papers
 - **Embedding Models**: SapBERT + multilingual-e5 for English support
 - **MedGemma**: Direct LLM queries and RAG-enhanced synthesis
 - **Multi-Stage Retrieval**: Paper-level search + atomic fact retrieval
-
-**Data Coverage**: 298 papers across 3 treatment modalities
-- Pharmacologic: 100 papers
-- Surgical: 99 papers
-- Lifestyle: 99 papers
 
 ---
 
@@ -168,7 +163,7 @@ python3 scripts/batch_structure_papers.py pharmacologic --skip-existing
 - Batch processing: All papers across all subsections
 - Time tracking: Elapsed time and processing rate
 
-**Success**: 100% success rate across all 3 domains (298 papers)
+**Success**: 100% success rate across all 3 domains
 
 ---
 
@@ -340,7 +335,7 @@ python3 scripts/setup_qdrant.py
 **Performance**:
 - Total search time: ~400ms for full query
 - Response: Top 5 papers in <500ms
-- Database: 298 papers (all domains)
+- Database: Structured medical papers across all domains
 
 **Usage**:
 ```bash
@@ -663,8 +658,8 @@ clinical-evidence-agent/
 │       │       └── papers/
 ├── qdrant_medical_db/              (Qdrant local database)
 │   ├── collection/
-│   │   ├── medical_papers/       (297 points, 3 named vectors each)
-│   │   └── atomic_facts/         (3,088 points, 1 named vector each)
+│   │   ├── medical_papers/       (3 named vectors each)
+│   │   └── atomic_facts/         (1 named vector each)
 │   └── ...                           (Qdrant storage files)
 ├── scripts/
 │   ├── fetch_paper_details.py        (PubMed download - main script)
@@ -845,7 +840,7 @@ clinical-evidence-agent/
 - **Database**: `./qdrant_medical_db`
 
 ### Search Performance
-- **Database Size**: 298 papers + 3,088 atomic facts
+- **Database Size**: Structured medical papers + atomic facts
 - **Query Time**: ~400ms (full query including embeddings)
 - **Vector Generation**: <20ms
 - **Similarity Calculation**: <50ms (cosine similarity)

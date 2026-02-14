@@ -40,46 +40,6 @@ Provide a structured answer with:
 Answer:"""
 
 
-def build_rag_prompt(papers, atomic_facts, query: str, language: str = 'en') -> str:
-    """Build RAG prompt with retrieved papers and atomic facts."""
-    papers_text = "\n\n".join([
-        f"Paper {i+1}: {p.get('metadata', {}).get('title', '')}\n"
-        f"PMID: {p.get('paper_id', '')}\n"
-        f"Journal: {p.get('metadata', {}).get('journal', '')}\n"
-        f"Year: {p.get('metadata', {}).get('publication_year', '')}\n"
-        f"Score: {round(float(p.get('score', 0)), 3)}"
-        for i, p in enumerate(papers[:3])
-    ])
-    
-    facts_text = "\n".join([f"- {f}" for f in atomic_facts[:5]])
-    
-    if language == 'ja':
-        return f"""以下の医療質問に基づいて、提供されたエビデンスに基づいて回答してください。
-
-質問: {query}
-
-関連論文:
-{papers_text}
-
-主要なファクト:
-{facts_text}
-
-関連研究やデータポイントを具体的に引用しながら、包括的な回答を日本語で提供してください。
-回答:"""
-    else:
-        return f"""Answer the following medical question based on the provided evidence.
-
-Question: {query}
-
-Relevant Papers:
-{papers_text}
-
-Key Facts:
-{facts_text}
-
-Provide a comprehensive answer in English, citing specific studies and data points when relevant.
-Answer:"""
-
 
 def stream_ollama(prompt: str):
     """Generator: yields tokens from Ollama streaming API."""
@@ -170,19 +130,23 @@ def query():
 
     def generate():
         try:
-            # ── RAG retrieval (rag or compare) ────────────────────────────
-            rag_prompt = None
+            # ── RAG retrieval (rag or compare) — Map-Reduce architecture ──
+            rag_answer = None
             if mode in ('rag', 'compare'):
-                yield sse({'type': 'progress', 'message': 'Qdrant 検索中...'})
+                yield sse({'type': 'progress', 'message': '翻訳中...'})
+                import search_qdrant
+                import medgemma_query
 
-                import search_qdrant  # lazy: model loading happens only once
+                # Step 1: Translate JP → EN
+                search_query = medgemma_query.translate_query(query_text)
 
-                search_results = search_qdrant.search_medical_papers(query_text, top_k=5)
+                # Step 2: Search papers + atomic facts
+                yield sse({'type': 'progress', 'message': '論文検索中...'})
+                search_results = search_qdrant.search_medical_papers(search_query, top_k=3)
                 papers = search_results.get('papers', [])
-                language = search_results.get('query_language', 'en')
 
-                facts_raw = search_qdrant.search_atomic_facts(query_text, limit=5)
-                atomic_facts = [f['fact_text'] for f in facts_raw]
+                paper_ids = [p.get('paper_id') for p in papers]
+                all_facts = search_qdrant.search_atomic_facts(search_query, limit=10, paper_ids=paper_ids)
 
                 context_payload = {
                     'papers': [
@@ -195,18 +159,34 @@ def query():
                         }
                         for p in papers[:3]
                     ],
-                    'facts': atomic_facts[:5],
+                    'facts': [f['fact_text'] for f in all_facts[:5]],
                 }
                 yield sse({'type': 'context', 'context': context_payload})
 
-                # Build RAG prompt with retrieved papers and atomic facts
-                rag_prompt = build_rag_prompt(papers, atomic_facts, query_text, language)
+                # Step 3: Map phase — analyze each paper individually
+                yield sse({'type': 'progress', 'message': '各論文を分析中... (Map phase)'})
+                facts_by_paper = {str(pid): [] for pid in paper_ids}
+                for fact in all_facts:
+                    pid = str(fact.get('paper_id'))
+                    if pid in facts_by_paper:
+                        facts_by_paper[pid].append(fact)
 
-            # ── Compare mode: stream RAG then direct ──────────────────────
+                valid_findings = []
+                for paper in papers:
+                    pid = str(paper.get('paper_id'))
+                    related_facts = facts_by_paper.get(pid, [])
+                    result = medgemma_query.analyze_single_paper(paper, related_facts, search_query)
+                    if result:
+                        valid_findings.append(result)
+
+                # Step 4: Reduce phase — synthesize into final answer
+                yield sse({'type': 'progress', 'message': '回答を統合中... (Reduce phase)'})
+                rag_answer = medgemma_query.synthesize_findings(valid_findings, query_text)
+
+            # ── Compare mode: emit RAG answer then stream direct ──────────
             if mode == 'compare':
-                yield sse({'type': 'progress', 'message': 'RAG 回答生成中...'})
-                for token in stream_ollama(rag_prompt):
-                    yield sse({'type': 'rag_token', 'token': token})
+                for line in rag_answer.split('\n'):
+                    yield sse({'type': 'rag_token', 'token': line + '\n'})
 
                 yield sse({'type': 'progress', 'message': '直接回答生成中...'})
                 direct_prompt = build_direct_prompt(query_text)
@@ -217,11 +197,12 @@ def query():
                 return
 
             # ── Single mode: direct or RAG ────────────────────────────────
-            prompt = rag_prompt if mode == 'rag' else build_direct_prompt(query_text)
-            yield sse({'type': 'progress', 'message': 'MedGemma 生成中...'})
-
-            for token in stream_ollama(prompt):
-                yield sse({'type': 'token', 'token': token})
+            if mode == 'rag':
+                yield sse({'type': 'token', 'token': rag_answer})
+            else:
+                yield sse({'type': 'progress', 'message': 'MedGemma 生成中...'})
+                for token in stream_ollama(build_direct_prompt(query_text)):
+                    yield sse({'type': 'token', 'token': token})
 
             yield sse({'type': 'done', 'mode': mode})
 

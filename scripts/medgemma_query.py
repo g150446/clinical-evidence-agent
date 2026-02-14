@@ -114,7 +114,6 @@ def analyze_single_paper(paper, related_facts, query, verbose=False):
 
     content = f"""Title: {metadata.get('title')}
 Intervention: {pico.get('intervention')}
-Outcome (Summary): {pico.get('outcome')}
 {facts_text}"""
 
     prompt = f"""Task: Check if the study below answers the question.
@@ -126,9 +125,12 @@ Question: {query}
 Study Data:
 {content}
 
+IMPORTANT: Extract numbers ONLY from the "Key Facts from Text" section.
+If "Key Facts from Text" is empty, or its facts do not address the question, output "IRRELEVANT".
+
 Output Format:
 - Drug Name: [Name]
-- Result: [Specific numbers from Outcome or Facts]
+- Result: [Numbers from Key Facts only]
 
 Answer:"""
 
@@ -161,9 +163,10 @@ Extracted Findings:
 
 Instructions:
 1. Answer "Yes" or "No" first.
-2. List the specific evidence (Drug names and Numbers) from the findings.
-3. Use Japanese.
-4. Provide a complete sentence, do not stop in the middle.
+2. List ONLY the specific evidence (Drug names and Numbers) that appear in the Extracted Findings above.
+3. Do NOT add information from your own knowledge. If a finding does not address the user's question, omit it.
+4. Use Japanese.
+5. Provide a complete sentence, do not stop in the middle.
 
 Output:"""
 
@@ -194,7 +197,7 @@ def run_map_reduce_query(query, verbose=False):
     papers = search_results['papers']
     
     if not papers:
-        return "関連する論文が見つかりませんでした。"
+        return "関連する論文が見つかりませんでした。", []
 
     # 2. Atomic Facts検索
     print("2. Searching atomic facts...")
@@ -210,18 +213,20 @@ def run_map_reduce_query(query, verbose=False):
     # 3. Mapフェーズ
     print("3. Analyzing each paper (Map phase)...")
     valid_findings = []
+    contributing_papers = []
     for paper in papers:
         pid = str(paper.get('paper_id'))
         related_facts = facts_by_paper.get(pid, [])
         result = analyze_single_paper(paper, related_facts, search_query, verbose)
         if result:
             valid_findings.append(result)
+            contributing_papers.append(paper)
 
     # 4. Reduceフェーズ
     print(f"4. Synthesizing {len(valid_findings)} findings (Reduce phase)...")
     final_answer = synthesize_findings(valid_findings, query)
 
-    return final_answer
+    return final_answer, contributing_papers
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -231,8 +236,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     if args.mode == 'rag':
-        answer = run_map_reduce_query(args.query, verbose=args.verbose)
+        answer, sources = run_map_reduce_query(args.query, verbose=args.verbose)
     else:
         answer = ask_medgemma_direct(args.query, verbose=args.verbose)
-        
+        sources = []
+
     print(f"\nAnswer:\n{answer}")
+    if sources:
+        print("\n参考論文:")
+        for i, p in enumerate(sources, 1):
+            meta = p.get('metadata', {})
+            print(f"  [{i}] {meta.get('title', p.get('paper_id'))}")
+            print(f"      {p.get('paper_id')} | {meta.get('journal', '')} | {meta.get('publication_year', '')}")

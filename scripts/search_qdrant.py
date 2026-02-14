@@ -12,6 +12,8 @@ import sys
 import time
 import argparse
 import logging
+import re
+import requests
 
 # Initialize Qdrant client
 print("Initializing Qdrant client...")
@@ -37,6 +39,34 @@ except Exception as e:
     raise
 
 print("✓ All models loaded\n")
+
+
+def translate_query(query):
+    """Translate Japanese query to English using MedGemma via Ollama."""
+    if not re.search(r'[\u3040-\u30FF\u4E00-\u9FFF]', query):
+        return query
+    prompt = f"""Task: Translate this Japanese medical question to English.
+Rules: Output ONLY the English translation text. No explanations.
+
+Japanese: {query}
+English:"""
+    try:
+        response = requests.post(
+            'http://localhost:11434/api/generate',
+            json={
+                'model': 'medgemma',
+                'prompt': prompt,
+                'stream': False,
+                'options': {'num_predict': 128, 'temperature': 0.0}
+            },
+            timeout=30
+        )
+        text = response.json().get('response', '').strip()
+        if '\n' in text:
+            text = text.split('\n')[0]
+        return text if text else query
+    except Exception:
+        return query
 
 
 def setup_logging(log_file=None):
@@ -230,37 +260,35 @@ def search_medical_papers(query, top_k=10):
     """Multi-stage medical paper search"""
     logger = logging.getLogger()
     start_time = time.time()
-    
+
     logger.info("="*70)
     logger.info("Medical Paper Search")
     logger.info("="*70)
-    
-    # Detect language
-    import re
-    lang = 'ja' if re.search(r'[\u3040-\u309F]', query) else 'en'
-    
-    # Generate query embedding
-    if lang == 'en':
-        query_vec = multilingual_e5.encode(f"query: {query}", normalize_embeddings=True)
-        vector_name = "e5_questions_en"
-    else:
-        query_vec = multilingual_e5.encode(f"query: {query}", normalize_embeddings=True)
-        vector_name = "e5_questions_ja"
-    
+
+    # Translate Japanese query to English before search
+    search_query = translate_query(query)
+    if search_query != query:
+        logger.info(f"Translated: {search_query}")
+
+    lang = 'ja' if search_query != query else 'en'
+
+    # Generate query embedding using translated (English) query
+    query_vec = multilingual_e5.encode(f"query: {search_query}", normalize_embeddings=True)
     query_vec = np.array(query_vec)
-    
-    # Search
+
+    # Search — pass translated query so extract_keywords() sees English terms
     papers = search_by_vector_similarity(
-        query_vec, 
-        "medical_papers", 
+        query_vec,
+        "medical_papers",
         limit=top_k,
-        query=query
+        query=search_query
     )
-    
+
     elapsed_time = (time.time() - start_time) * 1000
-    
+
     return {
         'query': query,
+        'search_query': search_query,
         'query_language': lang,
         'papers': papers,
         'search_strategy': 'vector_similarity',
