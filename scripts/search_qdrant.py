@@ -2,11 +2,12 @@
 """
 Qdrant search with real embeddings (Fixed for Filtering)
 Uses scroll() + manual vector similarity to work with available API
+- Auto-detects local Qdrant or falls back to Qdrant Cloud
+- Uses Embedding Service API for embedding generation (Cloud Run mode)
+- Falls back to local models if Embedding Service is unavailable
 """
 
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import sys
 import time
@@ -14,31 +15,155 @@ import argparse
 import logging
 import re
 import requests
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-# Initialize Qdrant client
-print("Initializing Qdrant client...")
-client = QdrantClient(path="./qdrant_medical_db")
-print("✓ Qdrant client initialized")
+# Load environment variables from .env file
+load_dotenv()
 
-# Load models
-print("Loading embedding models...")
+# Embedding Service configuration
+EMBEDDING_SERVICE_URL = os.getenv('EMBEDDING_SERVICE_URL')
+EMBEDDING_SERVICE_API_KEY = os.getenv('EMBEDDING_SERVICE_API_KEY')
+USE_EMBEDDING_SERVICE = EMBEDDING_SERVICE_URL is not None
 
-try:
-    sapbert = SentenceTransformer('cambridgeltl/SapBERT-from-PubMedBERT-fulltext')
-    print("✓ SapBERT loaded")
-except Exception as e:
-    print(f"✗ Error loading SapBERT: {e}")
-    # テスト用にダミーモデルで続行する場合のフォールバックが必要ならここに記述
-    raise
+def initialize_qdrant_client(force_cloud=False):
+    """Initialize Qdrant client - auto-detect local or cloud"""
+    local_path = "./qdrant_medical_db"
+    
+    # If force_cloud is True, skip local check and use cloud
+    if force_cloud:
+        print("Forcing Qdrant Cloud mode (--cloud flag specified)...")
+    elif Path(local_path).exists():
+        # Check if local Qdrant folder exists
+        print("Local Qdrant database found. Using local mode...")
+        client = QdrantClient(path=local_path)
+        print("✓ Local Qdrant client initialized")
+        return client, "local"
+    else:
+        # Fallback to Qdrant Cloud
+        print("Local Qdrant database not found. Connecting to Qdrant Cloud...")
+    
+    # Connect to Qdrant Cloud
+    cloud_url = os.getenv('QDRANT_CLOUD_ENDPOINT')
+    cloud_api_key = os.getenv('QDRANT_CLOUD_API_KEY')
+    
+    if not cloud_url or not cloud_api_key:
+        print("✗ Error: QDRANT_CLOUD_ENDPOINT or QDRANT_CLOUD_API_KEY not found in .env")
+        print("Please ensure these variables are set in your .env file:")
+        print("  QDRANT_CLOUD_ENDPOINT=https://your-cluster.cloud.qdrant.io")
+        print("  QDRANT_CLOUD_API_KEY=your-api-key")
+        sys.exit(1)
+    
+    print(f"  Endpoint: {cloud_url}")
+    client = QdrantClient(url=cloud_url, api_key=cloud_api_key)
+    print("✓ Connected to Qdrant Cloud")
+    return client, "cloud"
 
-try:
-    multilingual_e5 = SentenceTransformer('intfloat/multilingual-e5-large')
-    print("✓ multilingual-e5 loaded")
-except Exception as e:
-    print(f"✗ Error loading multilingual-e5: {e}")
-    raise
 
-print("✓ All models loaded\n")
+# Global variables - will be initialized in main
+client = None
+qdrant_mode = None
+sapbert = None
+multilingual_e5 = None
+
+
+def encode_via_embedding_service(text, model_type='e5'):
+    """
+    Generate embedding using Embedding Service API
+    
+    Args:
+        text: Text to encode
+        model_type: 'e5' or 'sapbert'
+    
+    Returns:
+        numpy array of embedding
+    """
+    if not EMBEDDING_SERVICE_URL:
+        raise RuntimeError("EMBEDDING_SERVICE_URL not configured")
+    
+    endpoint = f"{EMBEDDING_SERVICE_URL}/embed/{model_type}"
+    headers = {'Content-Type': 'application/json'}
+    
+    if EMBEDDING_SERVICE_API_KEY:
+        headers['Authorization'] = f'Bearer {EMBEDDING_SERVICE_API_KEY}'
+    
+    try:
+        response = requests.post(
+            endpoint,
+            json={'text': text},
+            headers=headers,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        return np.array(data['embedding'], dtype=np.float32)
+    
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Embedding Service API error: {e}")
+        raise RuntimeError(f"Failed to generate embedding via API: {e}")
+
+
+def load_models():
+    """Load embedding models (fallback for local development)"""
+    global sapbert, multilingual_e5
+    
+    if USE_EMBEDDING_SERVICE:
+        print("Using Embedding Service API (Cloud Run mode)")
+        print(f"  Endpoint: {EMBEDDING_SERVICE_URL}")
+        # Test connection
+        try:
+            response = requests.get(f"{EMBEDDING_SERVICE_URL}/health", timeout=5)
+            response.raise_for_status()
+            print("✓ Embedding Service is healthy")
+        except Exception as e:
+            print(f"⚠ Warning: Embedding Service health check failed: {e}")
+            print("  Will attempt to use it anyway...")
+        return
+    
+    # Fallback: Load local models
+    print("Loading local embedding models (Development mode)...")
+    
+    try:
+        from sentence_transformers import SentenceTransformer
+        sapbert = SentenceTransformer('cambridgeltl/SapBERT-from-PubMedBERT-fulltext')
+        print("✓ SapBERT loaded")
+    except Exception as e:
+        print(f"✗ Error loading SapBERT: {e}")
+        raise
+    
+    try:
+        from sentence_transformers import SentenceTransformer
+        multilingual_e5 = SentenceTransformer('intfloat/multilingual-e5-large')
+        print("✓ multilingual-e5 loaded")
+    except Exception as e:
+        print(f"✗ Error loading multilingual-e5: {e}")
+        raise
+    
+    print("✓ All models loaded\n")
+
+
+def cosine_similarity(X, Y):
+    """
+    Compute cosine similarity between samples in X and Y.
+    Compatible with sklearn.metrics.pairwise.cosine_similarity
+    
+    Args:
+        X: numpy array of shape (n_samples_X, n_features)
+        Y: numpy array of shape (n_samples_Y, n_features)
+    
+    Returns:
+        numpy array of shape (n_samples_X, n_samples_Y)
+    """
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    # Normalize vectors
+    X_norm = X / np.linalg.norm(X, axis=1, keepdims=True)
+    Y_norm = Y / np.linalg.norm(Y, axis=1, keepdims=True)
+    
+    # Compute dot product (cosine similarity)
+    return np.dot(X_norm, Y_norm.T)
 
 
 def translate_query(query):
@@ -284,8 +409,12 @@ def search_medical_papers(query, top_k=10):
 
     lang = 'ja' if search_query != query else 'en'
 
-    # Generate query embedding using translated (English) query
-    query_vec = multilingual_e5.encode(f"query: {search_query}", normalize_embeddings=True)
+    # Generate query embedding using Embedding Service or local model
+    if USE_EMBEDDING_SERVICE:
+        query_vec = encode_via_embedding_service(f"query: {search_query}", model_type='e5')
+    else:
+        query_vec = multilingual_e5.encode(f"query: {search_query}", normalize_embeddings=True)
+    
     query_vec = np.array(query_vec)
 
     # Search — pass translated query so extract_keywords() sees English terms
@@ -316,8 +445,12 @@ def search_atomic_facts(query, limit=5, paper_ids=None):
     logger = logging.getLogger()
     logger.info(f"Searching atomic_facts...")
     
-    # Generate Query Vector
-    query_vec = sapbert.encode(query, normalize_embeddings=True)
+    # Generate Query Vector using Embedding Service or local model
+    if USE_EMBEDDING_SERVICE:
+        query_vec = encode_via_embedding_service(query, model_type='sapbert')
+    else:
+        query_vec = sapbert.encode(query, normalize_embeddings=True)
+    
     query_vec = np.array(query_vec)
     
     try:
@@ -372,15 +505,21 @@ def search_atomic_facts(query, limit=5, paper_ids=None):
         for idx in top_indices:
             fact = all_facts[idx]
             score = similarities[idx]
-            
+
             results.append({
                 'json_path': fact.payload.get('json_path', ''),
                 'paper_id': fact.payload.get('paper_id', ''),
                 'fact_text': fact.payload.get('fact_text', ''),
                 'score': float(score)
             })
-        
-        return results
+
+        seen_texts = set()
+        deduped_results = []
+        for r in results:
+            if r['fact_text'] not in seen_texts:
+                deduped_results.append(r)
+                seen_texts.add(r['fact_text'])
+        return deduped_results
         
     except Exception as e:
         logger.info(f"  ✗ Error in search_atomic_facts: {e}")
@@ -391,7 +530,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Search medical papers using Qdrant')
     parser.add_argument('query', help='Search query text')
     parser.add_argument('--top_k', type=int, default=5, help='Number of results to return (default: 5)')
+    parser.add_argument('--cloud', action='store_true', help='Force Qdrant Cloud usage even if local database exists')
     args = parser.parse_args()
+    
+    # Initialize Qdrant client (with optional cloud forcing)
+    print("Initializing Qdrant client...")
+    client, qdrant_mode = initialize_qdrant_client(force_cloud=args.cloud)
+    
+    # Load models
+    load_models()
     
     # Set up logging
     logging.basicConfig(level=logging.INFO)

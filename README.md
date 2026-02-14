@@ -236,7 +236,14 @@ python3 scripts/download_remaining_pharmacologic.py pharmacologic
 
 **Usage**:
 ```bash
+# Generate embeddings to local database (default)
 python3 scripts/generate_embeddings.py
+
+# Generate embeddings to Qdrant Cloud
+python3 scripts/generate_embeddings.py --cloud
+
+# Check existing embeddings without generating (cloud mode)
+python3 scripts/generate_embeddings.py --cloud --check
 ```
 
 **Key Features**:
@@ -286,6 +293,48 @@ python3 scripts/setup_qdrant.py
 - 3 paper-level vectors: Removed Japanese question embeddings (e5_questions_ja)
 
 **Note**: This script was used during Phase 2 to set up the database
+
+---
+
+#### `scripts/setup_qdrant_cloud.py`
+**Purpose**: Initialize Qdrant Cloud collections with correct vector configuration
+
+**Input**: None (initialization script), requires `.env` with cloud credentials
+
+**Output**: Qdrant Cloud database with empty collections
+
+**Prerequisites**:
+- `QDRANT_CLOUD_ENDPOINT` and `QDRANT_CLOUD_API_KEY` in `.env` file
+- Active Qdrant Cloud cluster
+
+**Workflow**:
+1. Load credentials from `.env` file
+2. Connect to Qdrant Cloud
+3. Delete existing collections (if they exist)
+4. Create `medical_papers` collection with 3 named vectors:
+    - sapbert_pico: 768-dim, cosine distance
+    - e5_pico: 1024-dim, cosine distance
+    - e5_questions_en: 1024-dim, cosine distance
+5. Create `atomic_facts` collection with 1 named vector:
+    - sapbert_fact: 768-dim, cosine distance
+6. Verify collections after creation
+
+**Usage**:
+```bash
+# Initialize with confirmation prompt
+python3 scripts/setup_qdrant_cloud.py
+
+# Force initialization without confirmation
+python3 scripts/setup_qdrant_cloud.py --force
+```
+
+**Key Features**:
+- Cloud support: Works with Qdrant Cloud managed service
+- Safety confirmation: Prompts before deleting data (unless --force)
+- Verification: Checks collections after creation
+- Error handling: Validates credentials before connecting
+
+**Note**: Use this script before running `generate_embeddings.py --cloud`
 
 ---
 
@@ -339,7 +388,14 @@ python3 scripts/setup_qdrant.py
 
 **Usage**:
 ```bash
+# Auto-detect mode (uses local if exists, cloud if not)
 python3 scripts/search_qdrant.py "Does semaglutide reduce weight in obesity?"
+
+# Force cloud mode even when local database exists
+python3 scripts/search_qdrant.py --cloud "Does semaglutide reduce weight in obesity?"
+
+# Specify number of results
+python3 scripts/search_qdrant.py --cloud --top_k 10 "semaglutide side effects"
 ```
 
 **Key Features**:
@@ -470,6 +526,18 @@ python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" -
 
 # Compare mode (RAG side-by-side vs Direct)
 python3 scripts/medgemma_query.py "What are the benefits of GLP-1 agonists?" --mode compare
+
+# Use Qdrant Cloud (force cloud mode even when local exists)
+python3 scripts/medgemma_query.py "Does semaglutide reduce weight in obesity?" --cloud --mode rag
+
+# Verbose output with cloud
+python3 scripts/medgemma_query.py "What are the side effects of semaglutide?" --cloud --verbose
+
+# Use Hugging Face Inference API instead of local Ollama
+python3 scripts/medgemma_query.py "What is semaglutide?" --mode direct --HF
+
+# Combine cloud and HF options
+python3 scripts/medgemma_query.py "semaglutideの効果は？" --cloud --HF --mode rag --verbose
 ```
 
 **Key Features**:
@@ -880,6 +948,125 @@ python3 scripts/setup_qdrant.py
 # Generate embeddings for all papers
 python3 scripts/generate_embeddings.py
 ```
+
+---
+
+## Qdrant Cloud Support
+
+Qdrant Cloud can be used instead of local storage for better scalability and accessibility.
+
+### Setup Qdrant Cloud
+
+1. **Create a Cloud Account**: Sign up at [Qdrant Cloud](https://cloud.qdrant.io/)
+2. **Create a Cluster**: Follow the [Qdrant Cloud Quickstart](https://qdrant.tech/documentation/cloud-quickstart/)
+3. **Get API Credentials**:
+   - Copy your cluster URL and API key from the Qdrant Cloud dashboard
+   - Add them to your `.env` file:
+   ```bash
+   QDRANT_CLOUD_ENDPOINT=https://your-cluster.cloud.qdrant.io
+   QDRANT_CLOUD_API_KEY=your-api-key
+   ```
+
+### Initialize Qdrant Cloud
+
+Use the dedicated cloud initialization script:
+```bash
+# Initialize with confirmation prompt
+python3 scripts/setup_qdrant_cloud.py
+
+# Force initialization without prompt
+python3 scripts/setup_qdrant_cloud.py --force
+```
+
+This will:
+- Delete existing collections (if any)
+- Create `medical_papers` collection with 3 named vectors (768-dim + 1024-dim)
+- Create `atomic_facts` collection with 1 named vector (768-dim)
+- Verify the setup
+
+### Using Cloud Mode
+
+#### 1. Generate Embeddings to Cloud
+```bash
+# Upload embeddings to Qdrant Cloud
+python3 scripts/generate_embeddings.py --cloud
+```
+
+#### 2. Search with Cloud Database
+```bash
+# Auto-detect (uses local if exists, cloud if not)
+python3 scripts/search_qdrant.py "Does semaglutide reduce weight?"
+
+# Force cloud mode even when local exists
+python3 scripts/search_qdrant.py --cloud "Does semaglutide reduce weight?"
+```
+
+#### 3. Query with Cloud Database
+```bash
+# RAG mode with cloud
+python3 scripts/medgemma_query.py --cloud "semaglutideの効果は？"
+
+# Direct mode with cloud
+python3 scripts/medgemma_query.py --cloud --mode direct "What is semaglutide?"
+```
+
+#### 4. Use Hugging Face Inference API (Alternative to Ollama)
+
+Instead of local Ollama, you can use Hugging Face Inference API for MedGemma queries.
+
+**Prerequisites**:
+- Hugging Face account with Inference Endpoint deployed
+- `MEDGEMMA_CLOUD_ENDPOINT` and `HF_TOKEN` in `.env`:
+  ```bash
+  MEDGEMMA_CLOUD_ENDPOINT=https://your-endpoint.huggingface.cloud
+  HF_TOKEN=your-huggingface-token
+  ```
+
+**Usage**:
+```bash
+# Direct mode with Hugging Face
+python3 scripts/medgemma_query.py "What is semaglutide?" --mode direct --HF
+
+# RAG mode with Hugging Face and Qdrant Cloud
+python3 scripts/medgemma_query.py "semaglutideの効果は？" --cloud --HF --mode rag
+
+# Combine with other options
+python3 scripts/medgemma_query.py "What are GLP-1 agonists?" --HF --verbose --debug
+```
+
+**Backend Comparison**:
+
+| Feature | Ollama (Local) | Hugging Face (Cloud) |
+|---------|----------------|---------------------|
+| Setup | Install Ollama locally | Deploy HF Inference Endpoint |
+| Performance | Fast (local GPU/CPU) | Network latency (~1-3s) |
+| Cost | Free (own hardware) | Pay per usage |
+| Availability | Local only | Accessible from anywhere |
+| Best for | Development, privacy | Production, scalability |
+
+### Cloud vs Local Comparison
+
+| Feature | Local | Cloud |
+|---------|-------|-------|
+| Setup | Automatic | Requires account & API key |
+| Data persistence | Local filesystem | Cloud-hosted |
+| Accessibility | Local only | Accessible from anywhere |
+| Performance | Fast (local disk) | Network-dependent (~3-5s) |
+| Scalability | Limited by disk | Scalable |
+| Best for | Development, testing | Production, multi-user |
+
+### Troubleshooting Cloud Connection
+
+**Error**: Cannot connect to Qdrant Cloud
+```
+✗ Error: QDRANT_CLOUD_ENDPOINT or QDRANT_CLOUD_API_KEY not found in .env
+```
+
+**Solution**:
+1. Check your `.env` file contains both variables
+2. Verify the endpoint URL includes `https://`
+3. Ensure your API key is valid and not expired
+4. Check your network connection to Qdrant Cloud
 
 ---
 

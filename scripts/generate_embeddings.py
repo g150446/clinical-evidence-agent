@@ -6,10 +6,11 @@ Merged version with:
 - Deduplication logic (from generate_embeddings.py)
 - Qdrant path: ./qdrant_medical_db
 - Stops on error
+- Support for Qdrant Cloud (--cloud flag)
 """
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
+from qdrant_client.models import PointStruct, Distance, VectorParams
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
 import json
@@ -18,6 +19,12 @@ import time
 import uuid
 import logging
 import subprocess
+import os
+import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Suppress sentence-transformers INFO/DEBUG logs
 logging.getLogger('sentence_transformers').setLevel(logging.ERROR)
@@ -37,10 +44,66 @@ def get_cache_size(model_path):
         pass
     return "Unknown"
 
-# Initialize Qdrant client with path parameter
-print("Initializing Qdrant client...")
-client = QdrantClient(path="./qdrant_medical_db")
-print("✓ Qdrant client initialized")
+def initialize_qdrant_client(use_cloud=False):
+    """Initialize Qdrant client - local or cloud"""
+    if use_cloud:
+        # Get cloud credentials from environment
+        cloud_url = os.getenv('QDRANT_CLOUD_ENDPOINT')
+        cloud_api_key = os.getenv('QDRANT_CLOUD_API_KEY')
+        
+        if not cloud_url or not cloud_api_key:
+            print("✗ Error: QDRANT_CLOUD_ENDPOINT or QDRANT_CLOUD_API_KEY not found in .env")
+            print("Please ensure these variables are set in your .env file:")
+            print("  QDRANT_CLOUD_ENDPOINT=https://your-cluster.cloud.qdrant.io")
+            print("  QDRANT_CLOUD_API_KEY=your-api-key")
+            sys.exit(1)
+        
+        print("Connecting to Qdrant Cloud...")
+        print(f"  Endpoint: {cloud_url}")
+        client = QdrantClient(url=cloud_url, api_key=cloud_api_key)
+        print("✓ Connected to Qdrant Cloud")
+        return client, "cloud"
+    else:
+        # Local mode
+        print("Initializing local Qdrant client...")
+        client = QdrantClient(path="./qdrant_medical_db")
+        print("✓ Local Qdrant client initialized")
+        return client, "local"
+
+
+def setup_collections(client):
+    """Create Qdrant collections if they don't exist"""
+    print("\nChecking collections...")
+    
+    # Check if medical_papers collection exists
+    try:
+        client.get_collection("medical_papers")
+        print("✓ Collection 'medical_papers' exists")
+    except Exception:
+        print("  Creating collection: medical_papers...")
+        client.create_collection(
+            collection_name="medical_papers",
+            vectors_config={
+                "sapbert_pico": VectorParams(size=768, distance=Distance.COSINE),
+                "e5_pico": VectorParams(size=1024, distance=Distance.COSINE),
+                "e5_questions_en": VectorParams(size=1024, distance=Distance.COSINE)
+            }
+        )
+        print("  ✓ Created collection: medical_papers")
+    
+    # Check if atomic_facts collection exists
+    try:
+        client.get_collection("atomic_facts")
+        print("✓ Collection 'atomic_facts' exists")
+    except Exception:
+        print("  Creating collection: atomic_facts...")
+        client.create_collection(
+            collection_name="atomic_facts",
+            vectors_config={
+                "sapbert_fact": VectorParams(size=768, distance=Distance.COSINE)
+            }
+        )
+        print("  ✓ Created collection: atomic_facts")
 
 # Load models (use default HuggingFace cache)
 print("\nLoading embedding models...")
@@ -166,7 +229,7 @@ def process_paper(paper_path):
         # 6. Atomic facts (separate collection, 1 named vector per fact)
         atomic_points = []
         for idx, fact in enumerate(atomic_facts):
-            fact_uuid = str(uuid.uuid4())
+            fact_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{paper_id}_fact_{idx}"))
             fact_vec = sapbert.encode(fact, normalize_embeddings=True)
             atomic_points.append(
                 PointStruct(
@@ -195,10 +258,28 @@ def process_paper(paper_path):
 
 def main():
     """Process all structured papers"""
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate embeddings for medical papers')
+    parser.add_argument('--cloud', action='store_true', 
+                        help='Use Qdrant Cloud instead of local database')
+    parser.add_argument('--check', action='store_true',
+                        help='Only check existing embeddings, do not generate new ones')
+    args = parser.parse_args()
     
     print("="*70)
     print("Qdrant Embedding Generation (Merged Version)")
     print("="*70)
+    
+    # Initialize Qdrant client
+    global client
+    client, mode = initialize_qdrant_client(use_cloud=args.cloud)
+    
+    print(f"\nMode: {'Qdrant Cloud' if mode == 'cloud' else 'Local'}")
+    
+    # Setup collections (create if they don't exist)
+    setup_collections(client)
     
     # Check which papers actually have embeddings in Qdrant
     print("\nChecking Qdrant for existing embeddings...\n")
@@ -226,6 +307,14 @@ def main():
     except Exception as e:
         print(f"✗ Error checking Qdrant: {e}")
         existing_pmids = set()
+    
+    # If --check flag is set, only check and exit
+    if args.check:
+        print(f"\n{'='*70}")
+        print("Check Mode - Exiting without generating embeddings")
+        print(f"{'='*70}")
+        print(f"Existing papers in database: {len(existing_pmids)}")
+        return
     
     # Find all structured papers across all 3 domains and subsections
     all_papers = []
