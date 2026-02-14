@@ -138,8 +138,8 @@ def process_paper(paper_path):
             e5_questions_en_vec = np.zeros(1024, dtype=np.float32)
         
 
-        # Generate unique UUID for paper (FIXED: correctly placed at top level)
-        paper_uuid = str(uuid.uuid4())
+        # Deterministic UUID from paper_id: re-runs update the same point, no duplicates
+        paper_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, paper_id))
         
         # 5. Upsert to medical_papers collection (3 named vectors)
         client.upsert(

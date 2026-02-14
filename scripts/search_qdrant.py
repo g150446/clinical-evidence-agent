@@ -231,7 +231,13 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None
                     reranked_results.append(paper)
                 
                 reranked_results.sort(key=lambda x: x['score'], reverse=True)
-                return reranked_results[:limit]
+                seen = set()
+                deduped = []
+                for r in reranked_results:
+                    if r['paper_id'] not in seen:
+                        deduped.append(r)
+                        seen.add(r['paper_id'])
+                return deduped[:limit]
         
         # Fallback: Simple vector similarity
         top_indices = np.argsort(similarities)[::-1][:limit]
@@ -249,8 +255,14 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None
                 'metadata': point.payload.get('metadata', {})
             })
         
-        return results
-        
+        seen = set()
+        deduped = []
+        for r in results:
+            if r['paper_id'] not in seen:
+                deduped.append(r)
+                seen.add(r['paper_id'])
+        return deduped
+
     except Exception as e:
         logger.info(f"  ✗ Error in search_by_vector_similarity: {e}")
         return []
