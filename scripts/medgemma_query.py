@@ -12,77 +12,104 @@ import re
 import os
 
 def query_ollama(prompt, model="medgemma", temperature=0.0):
-    """Base function to query Ollama"""
-    try:
-        response = requests.post(
-            'http://localhost:11434/api/generate',
-            json={
-                'model': model,
-                'prompt': prompt,
-                'stream': False,
-                'options': {
-                    'num_ctx': 4096,
-                    'temperature': temperature,
-                    # 修正箇所: 生成長を256から1024に拡張し、回答切れを防止
-                    'num_predict': 1024,
-                    'repetition_penalty': 1.3,
-                }
-            },
-            timeout=120 # 生成が長くなるためタイムアウトも延長
-        )
-        response.raise_for_status()
-        return response.json().get('response', '').strip()
-    except Exception as e:
-        print(f"Error querying Ollama: {e}")
-        return ""
+    """
+    Base function to query MedGemma - now uses HF Dedicated Endpoint instead of Ollama.
+    Legacy name kept for compatibility.
+    """
+    # Redirect to HF endpoint
+    return query_huggingface(prompt, max_new_tokens=1024, temperature=temperature)
 
 
-def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1):
-    """Query Hugging Face Inference API endpoint for MedGemma"""
+def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=5):
+    """Query Hugging Face Dedicated Endpoint for MedGemma (OpenAI-compatible API)"""
     from pathlib import Path
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
-    
+
     endpoint = os.getenv("MEDGEMMA_CLOUD_ENDPOINT")
     hf_token = os.getenv("HF_TOKEN")
-    
+
     if not endpoint or not hf_token:
         raise RuntimeError("MEDGEMMA_CLOUD_ENDPOINT or HF_TOKEN not set in .env")
-    
+
+    # Ensure endpoint uses OpenAI-compatible path
+    if not endpoint.endswith('/v1/chat/completions'):
+        endpoint = endpoint.rstrip('/') + '/v1/chat/completions'
+
     headers = {
         "Authorization": f"Bearer {hf_token}",
         "Content-Type": "application/json"
     }
-    
+
+    # OpenAI-compatible chat format
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": max_new_tokens,
-            "temperature": temperature,
-            "return_full_text": False
-        }
+        "model": "tgi",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": max_new_tokens,
+        "temperature": temperature
     }
-    
-    try:
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json=payload,
-            timeout=120
-        )
-        response.raise_for_status()
-        result = response.json()
-        
-        # Hugging Face returns a list of generated texts
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get('generated_text', '').strip()
-        elif isinstance(result, dict):
-            return result.get('generated_text', '').strip()
-        else:
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+
+            # Check for 503 error (endpoint sleeping)
+            if response.status_code == 503:
+                if attempt == 0:
+                    print("HFエンドポイントはスリープ状態です。起動中...")
+                    print("(Scale-to-zero設定により、しばらく使用がないとスリープします)")
+                else:
+                    print(f"起動待機中... ({attempt}/{max_retries-1})")
+
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 30s, 60s, 120s, 120s, 120s...
+                    wait_time = min(30 * (2 ** attempt), 120)
+                    print(f"  {wait_time}秒後に再試行します...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print("✗ 最大リトライ回数に達しました。エンドポイントの起動に時間がかかりすぎています。")
+                    return ""
+
+            response.raise_for_status()
+            result = response.json()
+
+            # Success after retries
+            if attempt > 0:
+                print("✓ HFエンドポイントが起動しました！")
+
+            # Extract content from OpenAI-compatible response
+            if isinstance(result, dict) and 'choices' in result:
+                if len(result['choices']) > 0:
+                    content = result['choices'][0].get('message', {}).get('content', '')
+                    return content.strip()
+            
+            # Fallback for unexpected format
+            print(f"Warning: Unexpected response format: {result}")
             return str(result).strip()
-    except Exception as e:
-        print(f"Error querying Hugging Face: {e}")
-        return ""
+
+        except requests.exceptions.RequestException as e:
+            # Network errors - retry
+            if attempt < max_retries - 1:
+                wait_time = min(30 * (2 ** attempt), 120)
+                print(f"接続エラー: {e}")
+                print(f"  {wait_time}秒後に再試行します... ({attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                print(f"Error querying Hugging Face: {e}")
+                return ""
+        except Exception as e:
+            print(f"Error querying Hugging Face: {e}")
+            return ""
+
+    return ""
 
 def _query_openrouter(messages, max_tokens=256):
     """Call OpenRouter chat completions API (google/gemma-3-27b-it)."""
@@ -317,9 +344,7 @@ def run_map_reduce_query(query, verbose=False, debug=False, use_cloud=False, use
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import search_qdrant
 
-    # Initialize models and Qdrant client if not already done
-    if search_qdrant.multilingual_e5 is None:
-        search_qdrant.load_models()
+    # Initialize Qdrant client if not already done (models are loaded via APIs, not locally)
     if search_qdrant.client is None:
         search_qdrant.client, search_qdrant.qdrant_mode = search_qdrant.initialize_qdrant_client(force_cloud=use_cloud)
 

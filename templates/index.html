@@ -4,14 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Clinical Evidence Agent</title>
-<!-- 環境変数設定 -->
-<script src="config.js"></script>
-<script>
-// テスト環境の自動検出
-if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-  window.API_BASE_URL = 'http://localhost:8080';
-}
-</script>
 <style>
 /* ── Reset & Base ────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -374,7 +366,7 @@ const esc = s  => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt
 // ── Status ────────────────────────────────────────────────────────────────
   async function loadStatus() {
   try {
-    const r = await fetch(`${window.API_BASE_URL}/api/status`);
+    const r = await fetch('/api/status');
     const d = await r.json();
 
     const setDot = (id, ok, label) => {
@@ -527,7 +519,7 @@ async function runQuery() {
   }
 
   try {
-    const resp = await fetch(`${window.API_BASE_URL}/api/query`, {
+    const resp = await fetch('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: queryText, mode }),

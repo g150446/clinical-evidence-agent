@@ -10,6 +10,11 @@ import sys
 import os
 import json
 import requests as http_requests
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Setup paths so scripts can be imported
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -21,8 +26,14 @@ os.chdir(PROJECT_ROOT)
 app = Flask(__name__)
 CORS(app)
 
-OLLAMA_URL = 'http://localhost:11434/api/generate'
-OLLAMA_MODEL = 'medgemma'
+# MedGemma configuration - prefer HF Endpoint over local Ollama
+USE_HF_ENDPOINT = bool(os.getenv('MEDGEMMA_CLOUD_ENDPOINT'))
+MEDGEMMA_ENDPOINT = os.getenv('MEDGEMMA_CLOUD_ENDPOINT', '').rstrip('/')
+HF_TOKEN = os.getenv('HF_TOKEN', '')
+
+# Fallback to local Ollama if HF not configured
+OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'medgemma')
 OLLAMA_OPTIONS = {'num_ctx': 8192, 'temperature': 0.1, 'num_predict': 2048}
 
 
@@ -42,27 +53,63 @@ Answer:"""
 
 
 def stream_ollama(prompt: str):
-    """Generator: yields tokens from Ollama streaming API."""
-    resp = http_requests.post(
-        OLLAMA_URL,
-        json={
-            'model': OLLAMA_MODEL,
-            'prompt': prompt,
-            'stream': True,
-            'options': OLLAMA_OPTIONS,
-        },
-        stream=True,
-        timeout=120,
-    )
-    resp.raise_for_status()
-    for line in resp.iter_lines():
-        if line:
-            chunk = json.loads(line)
-            token = chunk.get('response', '')
-            if token:
-                yield token
-            if chunk.get('done', False):
-                break
+    """Generator: yields tokens from MedGemma (HF Endpoint or local Ollama)."""
+    if USE_HF_ENDPOINT:
+        # Use HF Dedicated Endpoint (OpenAI-compatible streaming)
+        endpoint = f"{MEDGEMMA_ENDPOINT}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "tgi",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 2048,
+            "temperature": 0.1,
+            "stream": True
+        }
+        
+        resp = http_requests.post(endpoint, headers=headers, json=payload, stream=True, timeout=180)
+        resp.raise_for_status()
+        
+        for line in resp.iter_lines():
+            if line:
+                line_str = line.decode('utf-8')
+                if line_str.startswith('data: '):
+                    data_str = line_str[6:]  # Remove "data: " prefix
+                    if data_str.strip() == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        if 'choices' in chunk and len(chunk['choices']) > 0:
+                            delta = chunk['choices'][0].get('delta', {})
+                            token = delta.get('content', '')
+                            if token:
+                                yield token
+                    except json.JSONDecodeError:
+                        continue
+    else:
+        # Fallback to local Ollama
+        resp = http_requests.post(
+            OLLAMA_URL,
+            json={
+                'model': OLLAMA_MODEL,
+                'prompt': prompt,
+                'stream': True,
+                'options': OLLAMA_OPTIONS,
+            },
+            stream=True,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                token = chunk.get('response', '')
+                if token:
+                    yield token
+                if chunk.get('done', False):
+                    break
 
 
 def sse(payload: dict) -> str:
@@ -79,24 +126,63 @@ def index():
 
 @app.route('/api/status')
 def status():
-    """Return connectivity status of Ollama and Qdrant."""
+    """Return connectivity status of cloud APIs (Qdrant Cloud, HF Endpoints, OpenRouter)."""
     result = {}
     
-    # Ollama
-    try:
-        resp = http_requests.get('http://localhost:11434/api/tags', timeout=5)
-        models = [m['name'] for m in resp.json().get('models', [])]
-        result['ollama'] = {'ok': True, 'models': models}
-    except Exception as exc:
-        result['ollama'] = {'ok': False, 'error': str(exc)}
-    
-    # Qdrant - Use existing client from search_qdrant.py
+    # Qdrant Cloud
     try:
         import search_qdrant
-        collections = [c.name for c in search_qdrant.client.get_collections().collections]
-        result['qdrant'] = {'ok': True, 'collections': collections}
+        qdrant_client, mode = search_qdrant.initialize_qdrant_client(force_cloud=True)
+        collections = [c.name for c in qdrant_client.get_collections().collections]
+        result['qdrant_cloud'] = {'ok': True, 'collections': collections, 'mode': mode}
     except Exception as exc:
-        result['qdrant'] = {'ok': False, 'error': str(exc)}
+        result['qdrant_cloud'] = {'ok': False, 'error': str(exc)}
+    
+    # OpenRouter API (E5 embeddings)
+    try:
+        import search_qdrant
+        test_embedding = search_qdrant.encode_via_openrouter("test query")
+        result['openrouter_api'] = {'ok': True, 'embedding_dim': len(test_embedding)}
+    except Exception as exc:
+        result['openrouter_api'] = {'ok': False, 'error': str(exc)}
+    
+    # HF Dedicated Endpoint (SapBERT embeddings)
+    try:
+        import search_qdrant
+        test_embedding = search_qdrant.encode_via_hf_dedicated("test medical term")
+        result['sapbert_endpoint'] = {'ok': True, 'embedding_dim': len(test_embedding)}
+    except Exception as exc:
+        result['sapbert_endpoint'] = {'ok': False, 'error': str(exc)}
+    
+    # MedGemma HF Endpoint (test actual connectivity)
+    if USE_HF_ENDPOINT and MEDGEMMA_ENDPOINT:
+        try:
+            test_endpoint = f"{MEDGEMMA_ENDPOINT}/v1/chat/completions"
+            test_resp = http_requests.post(
+                test_endpoint,
+                headers={
+                    "Authorization": f"Bearer {HF_TOKEN}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "tgi",
+                    "messages": [{"role": "user", "content": "test"}],
+                    "max_tokens": 5
+                },
+                timeout=10
+            )
+            if test_resp.status_code == 200:
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'ready', 'endpoint': MEDGEMMA_ENDPOINT}
+            elif test_resp.status_code == 503:
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping (will wake on query)', 'endpoint': MEDGEMMA_ENDPOINT}
+            else:
+                result['medgemma_endpoint'] = {'ok': False, 'status_code': test_resp.status_code, 'error': test_resp.text[:200]}
+        except Exception as exc:
+            result['medgemma_endpoint'] = {'ok': False, 'error': str(exc)}
+    elif MEDGEMMA_ENDPOINT:
+        result['medgemma_endpoint'] = {'ok': True, 'configured': True, 'endpoint': MEDGEMMA_ENDPOINT}
+    else:
+        result['medgemma_endpoint'] = {'ok': False, 'configured': False, 'note': 'Using local Ollama fallback'}
     
     return jsonify(result)
 
@@ -141,7 +227,7 @@ def query():
                 search_query = medgemma_query.translate_query(query_text)
 
                 # Step 2: Search papers + atomic facts
-                yield sse({'type': 'progress', 'message': '論文検索中...'})
+                yield sse({'type': 'progress', 'message': '論文検索中... (初回アクセス時は起動に時間がかかります)'})
                 search_results = search_qdrant.search_medical_papers(search_query, top_k=3)
                 papers = search_results.get('papers', [])
 
@@ -200,7 +286,7 @@ def query():
             if mode == 'rag':
                 yield sse({'type': 'token', 'token': rag_answer})
             else:
-                yield sse({'type': 'progress', 'message': 'MedGemma 生成中...'})
+                yield sse({'type': 'progress', 'message': 'MedGemma 生成中... (初回アクセス時は起動に時間がかかります)'})
                 for token in stream_ollama(build_direct_prompt(query_text)):
                     yield sse({'type': 'token', 'token': token})
 

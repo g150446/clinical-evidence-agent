@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Qdrant search with real embeddings (Fixed for Filtering)
+Qdrant search with real embeddings (Cloud API Integration)
 Uses scroll() + manual vector similarity to work with available API
 - Auto-detects local Qdrant or falls back to Qdrant Cloud
-- Uses Embedding Service API for embedding generation (Cloud Run mode)
-- Falls back to local models if Embedding Service is unavailable
+- Uses OpenRouter API for E5 embeddings (1024-dim)
+- Uses HF Dedicated Endpoint for SapBERT embeddings (768-dim)
 """
 
 from qdrant_client import QdrantClient
@@ -22,10 +22,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Embedding Service configuration
-EMBEDDING_SERVICE_URL = os.getenv('EMBEDDING_SERVICE_URL')
-EMBEDDING_SERVICE_API_KEY = os.getenv('EMBEDDING_SERVICE_API_KEY')
-USE_EMBEDDING_SERVICE = EMBEDDING_SERVICE_URL is not None
+# API configuration
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+SAPBERT_ENDPOINT = os.getenv('SAPBERT_ENDPOINT')
+HF_TOKEN = os.getenv('HF_TOKEN')
 
 def initialize_qdrant_client(force_cloud=False):
     """Initialize Qdrant client - auto-detect local or cloud"""
@@ -61,86 +61,148 @@ def initialize_qdrant_client(force_cloud=False):
     return client, "cloud"
 
 
-# Global variables - will be initialized in main
+# Global variables
 client = None
 qdrant_mode = None
-sapbert = None
-multilingual_e5 = None
 
 
-def encode_via_embedding_service(text, model_type='e5'):
+def encode_via_openrouter(text):
     """
-    Generate embedding using Embedding Service API
+    Generate E5 embedding using OpenRouter API
+    
+    Args:
+        text: Text to encode (use "query: <text>" prefix for queries)
+    
+    Returns:
+        numpy array of embedding (1024-dim)
+    """
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not set in .env")
+    
+    url = "https://openrouter.ai/api/v1/embeddings"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "http://localhost:8080",
+        "X-Title": "Clinical Evidence Agent",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "intfloat/multilingual-e5-large",
+        "input": text
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        embedding = data['data'][0]['embedding']
+        return np.array(embedding, dtype=np.float32)
+    
+    except requests.exceptions.RequestException as e:
+        logging.error(f"OpenRouter API error: {e}")
+        raise RuntimeError(f"Failed to generate E5 embedding: {e}")
+
+
+def encode_via_hf_dedicated(text, max_retries=5):
+    """
+    Generate SapBERT embedding using HF Dedicated Endpoint with retry logic for cold start
     
     Args:
         text: Text to encode
-        model_type: 'e5' or 'sapbert'
+        max_retries: Maximum number of retries for 503 errors (default: 5)
     
     Returns:
-        numpy array of embedding
+        numpy array of embedding (768-dim)
     """
-    if not EMBEDDING_SERVICE_URL:
-        raise RuntimeError("EMBEDDING_SERVICE_URL not configured")
+    if not SAPBERT_ENDPOINT:
+        raise RuntimeError("SAPBERT_ENDPOINT not set in .env")
     
-    endpoint = f"{EMBEDDING_SERVICE_URL}/embed/{model_type}"
-    headers = {'Content-Type': 'application/json'}
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN not set in .env")
     
-    if EMBEDDING_SERVICE_API_KEY:
-        headers['Authorization'] = f'Bearer {EMBEDDING_SERVICE_API_KEY}'
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json"
+    }
     
-    try:
-        response = requests.post(
-            endpoint,
-            json={'text': text},
-            headers=headers,
-            timeout=30
-        )
-        response.raise_for_status()
-        data = response.json()
-        return np.array(data['embedding'], dtype=np.float32)
+    payload = {"inputs": text}
     
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Embedding Service API error: {e}")
-        raise RuntimeError(f"Failed to generate embedding via API: {e}")
-
-
-def load_models():
-    """Load embedding models (fallback for local development)"""
-    global sapbert, multilingual_e5
-    
-    if USE_EMBEDDING_SERVICE:
-        print("Using Embedding Service API (Cloud Run mode)")
-        print(f"  Endpoint: {EMBEDDING_SERVICE_URL}")
-        # Test connection
+    for attempt in range(max_retries):
         try:
-            response = requests.get(f"{EMBEDDING_SERVICE_URL}/health", timeout=5)
+            response = requests.post(SAPBERT_ENDPOINT, headers=headers, json=payload, timeout=120)
+            
+            # Handle 503 error (endpoint sleeping / cold start)
+            if response.status_code == 503:
+                if attempt == 0:
+                    logging.warning("SapBERT endpoint is sleeping (scale-to-zero). Waking up...")
+                else:
+                    logging.warning(f"SapBERT endpoint still loading... (attempt {attempt+1}/{max_retries})")
+                
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 10s, 20s, 40s, 80s, 160s
+                    wait_time = min(10 * (2 ** attempt), 160)
+                    logging.warning(f"Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError("SapBERT endpoint failed to wake up after maximum retries")
+            
             response.raise_for_status()
-            print("✓ Embedding Service is healthy")
-        except Exception as e:
-            print(f"⚠ Warning: Embedding Service health check failed: {e}")
-            print("  Will attempt to use it anyway...")
-        return
+            data = response.json()
+            
+            # Success after retries
+            if attempt > 0:
+                logging.info("✓ SapBERT endpoint successfully loaded!")
+            
+            # HF Dedicated Endpoint returns 3D array: [[[embedding]]]
+            if isinstance(data, list) and len(data) > 0:
+                if isinstance(data[0], list) and len(data[0]) > 0:
+                    if isinstance(data[0][0], list):
+                        # 3D array
+                        embedding = data[0][0]
+                    else:
+                        # 2D array
+                        embedding = data[0]
+                else:
+                    # 1D array
+                    embedding = data
+            else:
+                raise RuntimeError(f"Unexpected response format: {type(data)}")
+            
+            return np.array(embedding, dtype=np.float32)
+        
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                logging.warning(f"Request failed: {e}. Retrying...")
+                time.sleep(10)
+                continue
+            else:
+                logging.error(f"HF Dedicated Endpoint error after {max_retries} attempts: {e}")
+                raise RuntimeError(f"Failed to generate SapBERT embedding: {e}")
+
+
+def check_api_configuration():
+    """Check if required API keys are configured"""
+    missing = []
+    if not OPENROUTER_API_KEY:
+        missing.append("OPENROUTER_API_KEY")
+    if not SAPBERT_ENDPOINT:
+        missing.append("SAPBERT_ENDPOINT")
+    if not HF_TOKEN:
+        missing.append("HF_TOKEN")
     
-    # Fallback: Load local models
-    print("Loading local embedding models (Development mode)...")
+    if missing:
+        print("✗ Missing required environment variables:")
+        for var in missing:
+            print(f"  - {var}")
+        print("\nPlease set these in your .env file")
+        sys.exit(1)
     
-    try:
-        from sentence_transformers import SentenceTransformer
-        sapbert = SentenceTransformer('cambridgeltl/SapBERT-from-PubMedBERT-fulltext')
-        print("✓ SapBERT loaded")
-    except Exception as e:
-        print(f"✗ Error loading SapBERT: {e}")
-        raise
-    
-    try:
-        from sentence_transformers import SentenceTransformer
-        multilingual_e5 = SentenceTransformer('intfloat/multilingual-e5-large')
-        print("✓ multilingual-e5 loaded")
-    except Exception as e:
-        print(f"✗ Error loading multilingual-e5: {e}")
-        raise
-    
-    print("✓ All models loaded\n")
+    print("Using Cloud APIs for embeddings:")
+    print(f"  - E5 (1024-dim): OpenRouter API")
+    print(f"  - SapBERT (768-dim): HF Dedicated Endpoint")
+    print()
 
 
 def cosine_similarity(X, Y):
@@ -284,6 +346,12 @@ def calculate_keyword_bonus(paper, keywords):
 
 def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None):
     """Search by manual vector similarity with 2-stage reranking"""
+    global client, qdrant_mode
+    
+    # Lazy initialization of Qdrant client
+    if client is None:
+        client, qdrant_mode = initialize_qdrant_client(force_cloud=True)
+    
     logger = logging.getLogger()
     logger.info(f"  Fetching all points from {collection_name}...")
     
@@ -409,12 +477,8 @@ def search_medical_papers(query, top_k=10):
 
     lang = 'ja' if search_query != query else 'en'
 
-    # Generate query embedding using Embedding Service or local model
-    if USE_EMBEDDING_SERVICE:
-        query_vec = encode_via_embedding_service(f"query: {search_query}", model_type='e5')
-    else:
-        query_vec = multilingual_e5.encode(f"query: {search_query}", normalize_embeddings=True)
-    
+    # Generate query embedding using OpenRouter API (E5)
+    query_vec = encode_via_openrouter(f"query: {search_query}")
     query_vec = np.array(query_vec)
 
     # Search — pass translated query so extract_keywords() sees English terms
@@ -442,15 +506,17 @@ def search_atomic_facts(query, limit=5, paper_ids=None):
     Search atomic facts collection by vector similarity
     CRITICAL FIX: Strictly filters by paper_ids if provided to avoid noise.
     """
+    global client, qdrant_mode
+    
+    # Lazy initialization of Qdrant client
+    if client is None:
+        client, qdrant_mode = initialize_qdrant_client(force_cloud=True)
+    
     logger = logging.getLogger()
     logger.info(f"Searching atomic_facts...")
     
-    # Generate Query Vector using Embedding Service or local model
-    if USE_EMBEDDING_SERVICE:
-        query_vec = encode_via_embedding_service(query, model_type='sapbert')
-    else:
-        query_vec = sapbert.encode(query, normalize_embeddings=True)
-    
+    # Generate Query Vector using HF Dedicated Endpoint (SapBERT)
+    query_vec = encode_via_hf_dedicated(query)
     query_vec = np.array(query_vec)
     
     try:
@@ -537,8 +603,8 @@ if __name__ == '__main__':
     print("Initializing Qdrant client...")
     client, qdrant_mode = initialize_qdrant_client(force_cloud=args.cloud)
     
-    # Load models
-    load_models()
+    # Check API configuration
+    check_api_configuration()
     
     # Set up logging
     logging.basicConfig(level=logging.INFO)

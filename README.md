@@ -1,57 +1,133 @@
 # Clinical Evidence Agent - Medical Search System
 
+**Deployment**: https://clinical-evidence-backend-73460068271.asia-northeast1.run.app
+
 ## Overview
 
 An intelligent medical evidence retrieval system combining:
-- **Qdrant Vector Database**: Semantic search across structured medical papers
-- **Embedding Models**: SapBERT + multilingual-e5 for English support
-- **MedGemma**: Direct LLM queries and RAG-enhanced synthesis
+- **Qdrant Cloud**: Semantic search across structured medical papers (cloud-hosted vector database)
+- **Embedding APIs**: OpenRouter (E5) + Hugging Face Dedicated Endpoint (SapBERT) for runtime query embeddings
+- **MedGemma**: Direct LLM queries and RAG-enhanced synthesis via Hugging Face Endpoint
 - **Multi-Stage Retrieval**: Paper-level search + atomic fact retrieval
+
+**Deployment Architecture**: Fully cloud-based single service on Google Cloud Run (no separate frontend) + managed APIs (no local dependencies)
 
 ---
 
-## System Architecture
+## 🏗️ Cloud Architecture (Production)
+
+### Runtime Environment (100% Cloud-Based)
+```
+[Client Browser]
+    ↓
+[Google Cloud Run: Flask Backend] ← Single unified service (Hackathon requirement met)
+  ├─ Memory: 256MiB (lightweight, no model loading)
+  ├─ Role: Frontend HTML delivery + Backend API orchestration
+  ├─ GET  / → index.html (static frontend)
+  ├─ GET  /api/status → Health check
+  ├─ POST /api/query → Main API (streaming)
+  │
+  ├─→ [OpenRouter API] 
+  │     └─ Model: intfloat/multilingual-e5-large (1024-dim)
+  │     └─ Purpose: Query embedding generation for paper search
+  │
+  ├─→ [Hugging Face Dedicated Endpoint]
+  │     └─ Model: cambridgeltl/SapBERT-from-PubMedBERT-fulltext (768-dim)
+  │     └─ Purpose: Query embedding generation for atomic fact search
+  │
+  ├─→ [Qdrant Cloud]
+  │     └─ Collections: medical_papers (3 vectors), atomic_facts (1 vector)
+  │     └─ Region: us-east4-0 (GCP)
+  │
+  └─→ [Hugging Face Endpoint: MedGemma 7b]
+        └─ Purpose: Medical inference with streaming support
+```
+
+### Data Preparation Phase (One-Time, Local Mac)
+```
+[Local Mac]
+  ├─ scripts/structure_paper.py → 5-layer JSON structuring
+  ├─ scripts/generate_embeddings.py → Create embeddings offline
+  └─→ Upload to [Qdrant Cloud] (one-time data preparation)
+```
+
+**Key Design Decisions**:
+- ✅ **Cloud Run**: Meets hackathon requirement (Google Cloud Platform)
+- ✅ **Single Service**: Simplified deployment (frontend + backend unified)
+- ✅ **Zero Local Dependencies**: Runtime completely independent of local Mac
+- ✅ **Managed APIs**: No infrastructure management, auto-scaling, pay-per-use
+- ✅ **Cost Optimization**: ~$24-30/month (HF Dedicated Endpoint + API usage)
+
+---
+
+## System Architecture (Query Flow)
 
 ```
 User Query (EN)
     ↓
-Qdrant Semantic Search
-    ├── [EN] Stage 1: Vector Similarity (top 30 candidates)
-    └── [EN] Stage 2: Keyword Reranking (bonus scores)
+[1] Query Embedding Generation
+    ├─ OpenRouter API: multilingual-e5-large (1024-dim)
+    └─ HF Dedicated Endpoint: SapBERT (768-dim)
     ↓
-Top 3 Papers + Atomic Facts
+[2] Qdrant Cloud Semantic Search
+    ├── Stage 1: Vector Similarity (top 30 candidates via scroll API)
+    └── Stage 2: Keyword Reranking (medical term bonus scores)
     ↓
-Map-Reduce Analysis
+[3] Top 3 Papers + Atomic Facts Retrieval
+    ↓
+[4] Map-Reduce Analysis (MedGemma 7b via HF Endpoint)
     ├── Phase 1 (Map): Analyze each paper individually
     │   ├── Extract drug name and numerical outcomes
     │   └── Filter irrelevant papers
     └── Phase 2 (Reduce): Synthesize findings
         └── Generate comprehensive English answer
     ↓
-Comprehensive Medical Answer
+Comprehensive Medical Answer (streamed via SSE)
 ```
+
+**Performance Metrics**:
+- Query embedding generation: ~100-300ms (API calls)
+- Vector search (Qdrant Cloud): ~50-100ms
+- MedGemma inference: ~1000-2000ms (streaming)
+- **Total response time**: ~2-3 seconds
 
 ---
 
 ## Component Descriptions
 
-### 1. Qdrant Vector Database
-- Collections: `medical_papers`, `atomic_facts`
-- Vectors: 3 named vectors per paper, 1 per atomic fact (4 total types per docs/search-flow.md)
-- Models: SapBERT (768-dim), multilingual-e5 (1024-dim)
-- Size: All structured papers + atomic facts
-- Database: `./qdrant_medical_db`
+### 1. Qdrant Cloud Vector Database
+- **Deployment**: Cloud-hosted (us-east4-0, GCP region)
+- **Collections**: `medical_papers` (3 vectors/doc), `atomic_facts` (1 vector/doc)
+- **Vectors**: 
+  - Papers: `sapbert_pico` (768-dim), `e5_pico` (1024-dim), `e5_questions_en` (1024-dim)
+  - Facts: `sapbert_fact` (768-dim)
+- **Data Size**: All structured papers + atomic facts from obesity domain
+- **Access**: REST API via `QDRANT_CLOUD_ENDPOINT` + API key
 
-### 2. Search Pipeline
-- Strategy: Vector similarity ranking
-- Metrics: Cosine similarity scores
-- Language: English only
-- Performance: ~400ms search time for top 5 papers
+### 2. Search Pipeline (scripts/search_qdrant.py)
+- **Embedding Generation**: 
+  - OpenRouter API (E5): Paper-level search via `e5_pico` or `e5_questions_en`
+  - HF Dedicated Endpoint (SapBERT): Atomic fact search via `sapbert_fact`
+- **Search Strategy**: 
+  - Stage 1: Cosine similarity on all documents (scroll API, limit 10,000)
+  - Stage 2: Keyword-based reranking with medical term importance weights
+- **Language**: English only
+- **Performance**: ~2.5 seconds total (including API calls)
 
-### 3. MedGemma Query Module
-- Modes: Direct query, RAG-enhanced synthesis
-- Integration: Ollama API
-- Context: Relevant papers + atomic facts from Qdrant
+### 3. MedGemma Query Module (scripts/medgemma_query.py)
+- **Deployment**: Hugging Face Endpoint (TGI-compatible)
+- **Modes**: Direct query, RAG-enhanced synthesis, Compare mode
+- **Integration**: REST API with streaming support (Server-Sent Events)
+- **Context Window**: Relevant papers + atomic facts from Qdrant search
+
+### 4. Cloud Run Frontend (app.py)
+- **Role**: Unified service (frontend HTML delivery + API orchestration with SSE streaming to client)
+- **Endpoints**:
+  - `GET /` - Serve index.html (frontend UI)
+  - `GET /api/status` - Health check (validates API connectivity)
+  - `POST /api/query` - Query endpoint with streaming response
+- **Memory**: 256MiB (no model loading, API client only)
+- **Dependencies**: Flask, gunicorn, requests, qdrant-client, numpy (lightweight)
 
 ---
 
@@ -915,10 +991,34 @@ clinical-evidence-agent/
 - **Results**: Top 5 papers in <500ms total time
 
 ### System End-to-End Performance
-- **Full Query (Qdrant + MedGemma RAG)**: ~5-10 seconds
-  - Qdrant search: ~400ms
-  - MedGemma RAG: ~4-9 seconds
-  - Response generation: ~100-200ms
+
+**Production (Cloud Run + HF Endpoints)**:
+- **Full Query (Qdrant Cloud + MedGemma RAG)**: 5-15 seconds (typical)
+  - Qdrant Cloud search: ~500-800ms
+  - OpenRouter E5 embedding: ~200-500ms
+  - HF SapBERT embedding: ~300-600ms
+  - MedGemma RAG synthesis: ~3-8 seconds
+  - Response streaming: ~100-200ms
+
+**Cold Start Performance** (first query after inactivity):
+- **Initial Access**: Up to 5-10 minutes (worst case)
+  - HF Dedicated Endpoints use "scale to zero" to reduce costs
+  - SapBERT endpoint: ~30-180 seconds to wake up
+  - MedGemma endpoint: ~60-300 seconds to wake up
+  - Both endpoints can cold start simultaneously
+- **Retry Logic**: Automatic retry with exponential backoff
+  - SapBERT: 5 retries (10s, 20s, 40s, 80s, 160s intervals)
+  - MedGemma: 5 retries (30s, 60s, 120s, 120s, 120s intervals)
+  - Maximum wait: ~310 seconds per endpoint
+- **Subsequent Queries**: Normal performance (~5-15 seconds) while endpoints are warm
+- **Cloud Run Timeout**: 600 seconds (10 minutes) to accommodate cold starts
+- **User Experience**: Progress messages inform "初回アクセス時は起動に時間がかかります"
+
+**Local Development (with local Ollama + local Qdrant)**:
+- **Full Query**: ~5-10 seconds (no cold start issues)
+  - Local Qdrant search: ~400ms
+  - Local embedding models: Instant (already loaded)
+  - Local MedGemma: ~4-9 seconds
 
 ---
 
@@ -1044,6 +1144,27 @@ python3 scripts/medgemma_query.py "What are GLP-1 agonists?" --HF --verbose --de
 | Availability | Local only | Accessible from anywhere |
 | Best for | Development, privacy | Production, scalability |
 
+**⚠️ Sleep State Handling**:
+
+HFエンドポイントはscale-to-zero設定の場合、使用がないとスリープ状態になります：
+
+```
+HFエンドポイントはスリープ状態です。起動中...
+(Scale-to-zero設定により、しばらく使用がないとスリープします)
+  30秒後に再試行します...
+起動待機中... (1/4)
+  60秒後に再試行します...
+✓ HFエンドポイントが起動しました！
+```
+
+スクリプトは自動的に以下を行います：
+- 503エラーを検出し、スリープ状態を認識
+- 指数関数的バックオフでリトライ（30秒→60秒→120秒...）
+- 最大5回リトライ（合計約5分）
+- 起動完了後、自動的にクエリを実行
+
+**注意**: スリープ状態からの起動には2-5分かかる場合があります。
+
 ### Cloud vs Local Comparison
 
 | Feature | Local | Cloud |
@@ -1071,6 +1192,33 @@ python3 scripts/medgemma_query.py "What are GLP-1 agonists?" --HF --verbose --de
 ---
 
 ## Usage Examples
+
+### 🌐 Web Application (Production)
+
+**Live URL**: https://clinical-evidence-backend-73460068271.asia-northeast1.run.app
+
+1. Open the URL in your browser
+2. Enter your medical question in English (e.g., "Does semaglutide reduce weight in obesity?")
+3. Select query mode:
+   - **Direct**: MedGemma answers without retrieving papers
+   - **RAG**: Evidence-based answer with paper citations
+   - **Compare**: Side-by-side comparison of both modes
+4. View streaming results with paper citations and evidence
+
+**API Access**:
+```bash
+# Health check
+curl https://clinical-evidence-backend-73460068271.asia-northeast1.run.app/api/status
+
+# Query with RAG mode
+curl -X POST https://clinical-evidence-backend-73460068271.asia-northeast1.run.app/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Does semaglutide reduce weight in obesity?", "mode": "rag"}'
+```
+
+---
+
+### 💻 Local Development & CLI Tools
 
 ### 1. Search for Medical Evidence
 
@@ -1264,6 +1412,74 @@ print(f'Payload: {scroll_result[0][0].payload}')
 
 ---
 
+## 🚀 Deployment
+
+### Cloud Run (Production)
+
+**Current Deployment**: https://clinical-evidence-backend-73460068271.asia-northeast1.run.app
+
+**Architecture**: Single unified service (frontend + backend)
+- Google Cloud Run (asia-northeast1)
+- Memory: 256MiB
+- Timeout: 300s
+- Auto-scaling: 0-10 instances
+
+**Deployment Scripts**:
+```bash
+# Full deployment (build + deploy + env vars)
+./deploy_cloud_run.sh
+
+# Update environment variables only (no rebuild)
+./update_env_vars.sh
+```
+
+**Manual Deployment**:
+```bash
+# Build Docker image
+gcloud builds submit --tag gcr.io/fit-authority-209603/clinical-evidence-backend
+
+# Deploy to Cloud Run
+gcloud run deploy clinical-evidence-backend \
+  --image gcr.io/fit-authority-209603/clinical-evidence-backend \
+  --platform managed \
+  --region asia-northeast1 \
+  --memory 256Mi \
+  --timeout 300s \
+  --allow-unauthenticated \
+  --project fit-authority-209603
+```
+
+**Required Environment Variables**:
+- `QDRANT_CLOUD_ENDPOINT` - Qdrant Cloud URL
+- `QDRANT_CLOUD_API_KEY` - Qdrant authentication
+- `OPENROUTER_API_KEY` - OpenRouter API key
+- `SAPBERT_ENDPOINT` - HF Dedicated Endpoint URL
+- `HF_TOKEN` - Hugging Face token
+- `MEDGEMMA_CLOUD_ENDPOINT` - MedGemma inference endpoint
+
+**Service Management**:
+```bash
+# View logs
+gcloud run services logs read clinical-evidence-backend \
+  --region asia-northeast1 --project fit-authority-209603
+
+# Check service status
+gcloud run services describe clinical-evidence-backend \
+  --region asia-northeast1 --project fit-authority-209603
+
+# Delete service
+gcloud run services delete clinical-evidence-backend \
+  --region asia-northeast1 --project fit-authority-209603
+```
+
+**Cost**: ~$25-30/month
+- Cloud Run: ~$0-5/month (low traffic)
+- HF Dedicated Endpoint: $24/month
+- OpenRouter API: Pay-per-use (~$0.00016/request)
+- Qdrant Cloud: Free tier
+
+---
+
 ## Contributing
 
 ### Guidelines
@@ -1276,12 +1492,63 @@ print(f'Payload: {scroll_result[0][0].payload}')
 ### Directory Structure
 - Keep scripts in `scripts/` directory
 - Keep data in `data/obesity/` directory
-- Keep Qdrant database in `qdrant_medical_db/` directory
+- Keep frontend HTML in `templates/` directory (served by Flask)
 - Output logs to console and save results to JSON files
 
 ---
 
 ## Version History
+
+### v1.4 (2026-02-14) - Cloud Run Single Service Architecture
+- **Migration**: Frontend + Backend unified into single Cloud Run service
+  - **Removed**: Separate Nginx frontend service (`clinical-evidence-frontend`)
+  - **Unified**: Flask backend now serves both frontend HTML and API endpoints
+  - **Benefits**: Simplified deployment, no CORS, reduced cost, single URL
+- **Frontend Integration**:
+  - Frontend UI integrated into Flask backend
+  - Served from `templates/index.html`
+  - Removed separate frontend service and `frontend/` directory
+  - Removed `config.js` dependency
+  - Changed API calls to relative paths (`/api/status`, `/api/query`)
+  - No separate environment variables needed
+- **Cloud APIs Migration**:
+  - Replaced local Ollama with HF Endpoint (MedGemma 7b)
+  - Replaced local embedding models with APIs:
+    - OpenRouter API: `intfloat/multilingual-e5-large` (1024-dim)
+    - HF Dedicated Endpoint: `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
+  - Qdrant Cloud integration (us-east4-0, GCP)
+- **Cold Start Handling**: ⭐ NEW
+  - **Issue**: HF Dedicated Endpoints use "scale to zero" - sleep after inactivity, causing 503 errors
+  - **Solution**: Implemented retry logic with exponential backoff
+    - `search_qdrant.py`: SapBERT endpoint retries up to 5 times (10s, 20s, 40s, 80s, 160s)
+    - `medgemma_query.py`: MedGemma endpoint retries up to 5 times (30s, 60s, 120s, 120s, 120s)
+    - Cloud Run timeout extended: 300s → 600s (10 minutes) to accommodate cold starts
+  - **UX Improvement**: Progress messages inform users "初回アクセス時は起動に時間がかかります"
+  - **Maximum Wait Time**: ~310 seconds per endpoint (both endpoints can cold start simultaneously)
+- **Deployment**:
+  - Single service URL: `https://clinical-evidence-backend-*.run.app`
+  - Memory optimized: 256MiB (down from potential 1GB+)
+  - Timeout: 600s (extended for HF cold starts)
+  - Single Dockerfile: Removed `Dockerfile.frontend` and `frontend/Dockerfile`
+  - Created deployment scripts: `deploy_cloud_run.sh`, `update_env_vars.sh`
+- **Cleanup**:
+  - Deleted `frontend/` directory (integrated into `templates/`)
+  - Deleted `embedding_service/` directory (replaced with cloud APIs)
+  - Removed unused Dockerfiles (3 → 1)
+- **Files Updated**:
+  - `templates/index.html`: Updated with latest frontend, removed external dependencies
+  - `app.py`: Added cloud API health checks + cold start progress messages
+  - `scripts/search_qdrant.py`: Lazy Qdrant initialization + SapBERT retry logic (timeout: 60s → 120s)
+  - `scripts/medgemma_query.py`: Redirected to HF Endpoint + enhanced retry logic + OpenAI-compatible API
+  - `deploy_cloud_run.sh`: Extended timeout to 600s
+  - `README.md`: Comprehensive architecture update + cold start documentation
+  - `CLAUDE.md`: Updated with production deployment info
+  - `.gcloudignore`: Fixed file exclusion issues
+- **Files Deleted**:
+  - `frontend/` directory and all contents
+  - `Dockerfile.frontend`
+  - `frontend/Dockerfile`
+  - `embedding_service/` directory and all contents
 
 ### v1.3 (2026-02-13) - English-Only Support + 2-Stage Processing
 - **structure_paper.py**: Implemented 2-stage processing (Stage 1 + Stage 2)

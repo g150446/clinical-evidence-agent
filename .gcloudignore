@@ -39,12 +39,21 @@ start.sh
 plans/
 
 # --- 追加する設定 ---
-# Backend関連ファイルを除外
-app.py
-scripts/
-requirements.txt
-Dockerfile  # 既存のバックエンドDockerfile
+# Frontend関連ファイルを除外（backendデプロイ時は不要）
+frontend/
+embedding_service/
+Dockerfile.frontend
 
 # テスト・ドキュメントを除外
 hello-flask/
 history/
+docs/
+AGENTS.md
+CLAUDE.md
+
+# Deployment scripts
+deploy_cloud_run.sh
+update_env_vars.sh
+run_flask.sh
+stop_flask.sh
+generate_certs.sh
