@@ -267,17 +267,42 @@ def query():
 
                 # Step 4: Reduce phase — synthesize into final answer
                 yield sse({'type': 'progress', 'message': '回答を統合中... (Reduce phase)'})
-                rag_answer = medgemma_query.synthesize_findings(valid_findings, query_text)
+                rag_answer = medgemma_query.synthesize_findings(valid_findings, search_query)
+                
+                # Step 5: Translate to Japanese if original query was in Japanese
+                import re
+                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
+                if is_japanese and rag_answer:
+                    yield sse({'type': 'progress', 'message': '日本語に翻訳中...'})
+                    rag_answer = medgemma_query.translate_to_japanese(rag_answer)
 
             # ── Compare mode: emit RAG answer then stream direct ──────────
             if mode == 'compare':
                 for line in rag_answer.split('\n'):
                     yield sse({'type': 'rag_token', 'token': line + '\n'})
 
+                # Translate query for direct mode if Japanese
+                import re
+                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
+                if is_japanese:
+                    query_en = medgemma_query.translate_query(query_text)
+                else:
+                    query_en = query_text
+                
                 yield sse({'type': 'progress', 'message': '直接回答生成中...'})
-                direct_prompt = build_direct_prompt(query_text)
+                direct_prompt = build_direct_prompt(query_en)
+                
+                # Collect direct answer
+                direct_answer = ""
                 for token in stream_ollama(direct_prompt):
+                    direct_answer += token
                     yield sse({'type': 'direct_token', 'token': token})
+                
+                # Translate back if Japanese
+                if is_japanese and direct_answer:
+                    yield sse({'type': 'progress', 'message': '直接回答を日本語に翻訳中...'})
+                    translated_direct = medgemma_query.translate_to_japanese(direct_answer)
+                    yield sse({'type': 'direct_replace', 'token': translated_direct})
 
                 yield sse({'type': 'done', 'mode': 'compare'})
                 return
@@ -286,9 +311,30 @@ def query():
             if mode == 'rag':
                 yield sse({'type': 'token', 'token': rag_answer})
             else:
+                # Direct mode: translate query if Japanese, then translate answer back
+                import re
+                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
+                
+                if is_japanese:
+                    yield sse({'type': 'progress', 'message': '翻訳中...'})
+                    query_en = medgemma_query.translate_query(query_text)
+                else:
+                    query_en = query_text
+                
                 yield sse({'type': 'progress', 'message': 'MedGemma 生成中... (初回アクセス時は起動に時間がかかります)'})
-                for token in stream_ollama(build_direct_prompt(query_text)):
+                
+                # Collect streaming tokens into a buffer
+                direct_answer = ""
+                for token in stream_ollama(build_direct_prompt(query_en)):
+                    direct_answer += token
                     yield sse({'type': 'token', 'token': token})
+                
+                # If original query was Japanese, translate answer back
+                if is_japanese and direct_answer:
+                    yield sse({'type': 'progress', 'message': '日本語に翻訳中...'})
+                    translated = medgemma_query.translate_to_japanese(direct_answer)
+                    # Clear previous answer and emit translated version
+                    yield sse({'type': 'replace', 'token': translated})
 
             yield sse({'type': 'done', 'mode': mode})
 

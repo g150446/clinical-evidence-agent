@@ -567,6 +567,13 @@ async function runQuery() {
             appendToken($('body-single'), evt.token);
             break;
 
+          case 'replace':
+            // Replace entire content (for translation)
+            setProgress(false);
+            $('body-single').innerHTML = '';
+            appendToken($('body-single'), evt.token);
+            break;
+
           case 'rag_token':
             setProgress(false);
             appendToken($('body-rag'), evt.token);
@@ -574,6 +581,13 @@ async function runQuery() {
 
           case 'direct_token':
             setProgress(true, '直接回答生成中...');
+            appendToken($('body-direct'), evt.token);
+            break;
+
+          case 'direct_replace':
+            // Replace direct answer content (for translation)
+            setProgress(false);
+            $('body-direct').innerHTML = '';
             appendToken($('body-direct'), evt.token);
             break;
 

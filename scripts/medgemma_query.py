@@ -236,21 +236,23 @@ def analyze_single_paper(paper, related_facts, query, verbose=False, debug=False
 Intervention: {pico.get('intervention')}
 {facts_text}"""
 
-    prompt = f"""Task: Check if the study below answers the question.
-If YES, extract the specific drug name and numerical outcome (e.g., %, score change).
-If NO or Irrelevant, output "IRRELEVANT".
+    prompt = f"""You are analyzing a medical study to answer the user's question.
 
 Question: {query}
 
 Study Data:
 {content}
 
-IMPORTANT: Extract numbers ONLY from the "Key Facts from Text" section.
-If "Key Facts from Text" is empty, or its facts do not address the question, output "IRRELEVANT".
+Task:
+1. Check if the study addresses the question
+2. If YES: Extract specific drug names, dosages, and numerical outcomes (percentages, scores, changes)
+3. If NO or IRRELEVANT: Respond with "IRRELEVANT"
 
-Output Format:
-- Drug Name: [Name]
-- Result: [Numbers from Key Facts only]
+Important Rules:
+- Use ONLY information from "Key Facts from Text"
+- If "Key Facts from Text" is empty or irrelevant, output "IRRELEVANT"
+- Include specific numbers, percentages, and statistical significance when available
+- Be specific about the intervention and outcome
 
 Answer:"""
 
@@ -264,7 +266,7 @@ Answer:"""
 
     # Use Hugging Face or Ollama based on use_hf flag
     if use_hf:
-        response = query_huggingface(prompt, max_new_tokens=1024, temperature=0.1)
+        response = query_huggingface(prompt, max_new_tokens=512, temperature=0.1)
     else:
         response = query_ollama(prompt)
 
@@ -272,11 +274,28 @@ Answer:"""
         print(f"\n====== DEBUG: Map Response ({metadata.get('title','')[:50]}) ======")
         print(response)
         print("========================================\n")
+    
+    # Remove "thought" prefix if present
+    if response.lower().startswith("thought"):
+        lines = response.split('\n')
+        clean_lines = []
+        skip_thinking = False
+        for line in lines:
+            if line.strip().lower().startswith(("thought", "thinking process")):
+                skip_thinking = True
+                continue
+            if skip_thinking and line.strip().startswith(("1.", "2.", "**", "-")):
+                continue
+            if skip_thinking and len(line.strip()) > 30:
+                skip_thinking = False
+            if not skip_thinking:
+                clean_lines.append(line)
+        response = '\n'.join(clean_lines).strip()
 
     if "IRRELEVANT" in response.upper() or len(response) < 10:
         return None
     
-    if verbose: print(f"     -> Extracted: {response.replace(chr(10), ' ' )[:50]}...")
+    if verbose: print(f"     -> Extracted: {response.replace(chr(10), ' ')[:50]}...")
     return response
 
 # ==========================================
@@ -303,20 +322,22 @@ def synthesize_findings(findings, query_en, debug=False, use_hf=False):
 
     bullet_points = "\n".join([f"- {f}" for f in findings])
 
-    prompt = f"""You are a medical assistant. Summarize the following findings to answer the user's question.
+    prompt = f"""You are a medical research assistant. Based on the extracted findings from clinical studies, provide a comprehensive answer to the user's question.
 
 User Question: {query_en}
 
-Extracted Findings:
+Extracted Findings from Clinical Studies:
 {bullet_points}
 
 Instructions:
-1. Answer "Yes" or "No" first.
-2. List ONLY the specific evidence (Drug names and Numbers) that appear in the Extracted Findings above.
-3. Do NOT add information from your own knowledge. If a finding does not address the user's question, omit it.
-4. Provide a complete sentence, do not stop in the middle.
+1. Start with a direct answer (Yes/No/Partially/Unclear)
+2. Explain the key findings from the studies in 2-3 sentences
+3. Include specific drug names, dosages, and numerical outcomes (percentages, scores, etc.) when mentioned
+4. Cite study details (PMID numbers) to support your answer
+5. Be concise but informative - aim for 3-5 sentences total
+6. Use ONLY the information from the Extracted Findings above - do not add external knowledge
 
-Output:"""
+Answer:"""
 
     if debug:
         print("\n====== DEBUG: Reduce Prompt ======")
@@ -333,6 +354,27 @@ Output:"""
         print("\n====== DEBUG: Reduce Response ======")
         print(raw)
         print("====================================\n")
+    
+    # Remove "thought" prefix if present (MedGemma characteristic)
+    if raw.lower().startswith("thought"):
+        lines = raw.split('\n')
+        # Skip lines starting with "thought" or "Thinking Process"
+        clean_lines = []
+        skip_thinking = False
+        for line in lines:
+            if line.strip().lower().startswith(("thought", "thinking process")):
+                skip_thinking = True
+                continue
+            if skip_thinking and line.strip().startswith(("1.", "2.", "**", "-")):
+                continue
+            if skip_thinking and (line.strip().lower().startswith("answer:") or len(line.strip()) > 50):
+                skip_thinking = False
+            if not skip_thinking:
+                clean_lines.append(line)
+        raw = '\n'.join(clean_lines).strip()
+        # Remove "Answer:" prefix if present
+        if raw.lower().startswith("answer:"):
+            raw = raw[7:].strip()
 
     return _truncate_at_repetition(raw)
 
