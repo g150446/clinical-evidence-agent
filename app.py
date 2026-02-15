@@ -9,6 +9,8 @@ from flask_cors import CORS
 import sys
 import os
 import json
+import queue
+import threading
 import requests as http_requests
 from pathlib import Path
 from dotenv import load_dotenv
@@ -232,7 +234,30 @@ def query():
                 papers = search_results.get('papers', [])
 
                 paper_ids = [p.get('paper_id') for p in papers]
-                all_facts = search_qdrant.search_atomic_facts(search_query, limit=10, paper_ids=paper_ids)
+                # search_atomic_facts をスレッド内で実行し、SapBERT cold start の進捗をSSEで中継
+                _facts_q = queue.Queue()
+                def _facts_thread():
+                    def pcb(msg):
+                        _facts_q.put({'type': 'progress', 'message': msg})
+                    try:
+                        _facts_q.put({'type': 'result', 'value': search_qdrant.search_atomic_facts(
+                            search_query, limit=10, paper_ids=paper_ids, progress_cb=pcb)})
+                    except Exception as e:
+                        _facts_q.put({'type': 'error', 'message': str(e)})
+                    finally:
+                        _facts_q.put({'type': '__done__'})
+                threading.Thread(target=_facts_thread, daemon=True).start()
+                all_facts = []
+                while True:
+                    item = _facts_q.get(timeout=120)
+                    if item['type'] == '__done__':
+                        break
+                    elif item['type'] == 'progress':
+                        yield sse({'type': 'progress', 'message': item['message']})
+                    elif item['type'] == 'result':
+                        all_facts = item['value']
+                    elif item['type'] == 'error':
+                        raise RuntimeError(item['message'])
 
                 context_payload = {
                     'papers': [
@@ -249,27 +274,57 @@ def query():
                 }
                 yield sse({'type': 'context', 'context': context_payload})
 
-                # Step 3: Map phase — analyze each paper individually
-                yield sse({'type': 'progress', 'message': '各論文を分析中... (Map phase)'})
+                # Step 3+4: Map-Reduce phases — threaded to relay SSE progress during MedGemma cold start
                 facts_by_paper = {str(pid): [] for pid in paper_ids}
                 for fact in all_facts:
                     pid = str(fact.get('paper_id'))
                     if pid in facts_by_paper:
                         facts_by_paper[pid].append(fact)
 
-                valid_findings = []
-                contributing_papers = []
-                for paper in papers:
-                    pid = str(paper.get('paper_id'))
-                    related_facts = facts_by_paper.get(pid, [])
-                    result = medgemma_query.analyze_single_paper(paper, related_facts, search_query)
-                    if result:
-                        valid_findings.append(result)
-                        contributing_papers.append(paper)
+                _mr_q = queue.Queue()
+                def _map_reduce_thread():
+                    def pcb(msg):
+                        _mr_q.put({'type': 'progress', 'message': msg})
+                    try:
+                        _vf, _cp = [], []
+                        for paper in papers:
+                            pid = str(paper.get('paper_id'))
+                            rf = facts_by_paper.get(pid, [])
+                            r = medgemma_query.analyze_single_paper(paper, rf, search_query, progress_cb=pcb)
+                            if r:
+                                _vf.append(r)
+                                _cp.append(paper)
+                        _mr_q.put({'type': 'progress', 'message': '回答を統合中... (Reduce phase)'})
+                        ans = medgemma_query.synthesize_findings(_vf, search_query, progress_cb=pcb)
+                        _mr_q.put({'type': 'result', 'answer': ans, 'papers': _cp})
+                    except Exception as e:
+                        _mr_q.put({'type': 'error', 'message': str(e)})
+                    finally:
+                        _mr_q.put({'type': '__done__'})
 
-                # Step 4: Reduce phase — synthesize into final answer
-                yield sse({'type': 'progress', 'message': '回答を統合中... (Reduce phase)'})
-                rag_answer = medgemma_query.synthesize_findings(valid_findings, search_query)
+                threading.Thread(target=_map_reduce_thread, daemon=True).start()
+                rag_answer, contributing_papers = None, []
+                while True:
+                    try:
+                        item = _mr_q.get(timeout=70)
+                    except queue.Empty:
+                        yield sse({'type': 'progress', 'message': 'エンドポイント起動待機中...'})
+                        continue
+                    if item['type'] == '__done__':
+                        break
+                    elif item['type'] == 'progress':
+                        yield sse({'type': 'progress', 'message': item['message']})
+                    elif item['type'] == 'result':
+                        rag_answer = item['answer']
+                        contributing_papers = item['papers']
+                    elif item['type'] == 'error':
+                        raise RuntimeError(item['message'])
+
+                # 空回答ガード（raise 後はここに来ないが念のため）
+                if not rag_answer:
+                    yield sse({'type': 'error', 'message': 'MedGemmaが応答しませんでした。しばらく後に再試行してください。'})
+                    yield sse({'type': 'done', 'mode': mode})
+                    return
                 
                 # Step 5: Translate to Japanese if original query was in Japanese
                 import re

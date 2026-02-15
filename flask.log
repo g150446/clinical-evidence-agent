@@ -4,13 +4,16 @@ HTTP:8080でFlaskを起動します...
 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on all addresses (0.0.0.0)
  * Running on http://127.0.0.1:8080
- * Running on http://172.30.221.207:8080
+ * Running on http://192.168.1.167:8080
 [33mPress CTRL+C to quit[0m
-127.0.0.1 - - [15/Feb/2026 11:52:01] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 11:52:04] "POST /api/query HTTP/1.1" 200 -
-WARNING:root:SapBERT endpoint is sleeping (scale-to-zero). Waking up...
+127.0.0.1 - - [15/Feb/2026 13:07:04] "GET / HTTP/1.1" 200 -
+WARNING:root:SapBERTエンドポイント起動中...
 WARNING:root:Retrying in 10s...
-WARNING:root:SapBERT endpoint is sleeping (scale-to-zero). Waking up...
-WARNING:root:Retrying in 10s...
-127.0.0.1 - - [15/Feb/2026 11:52:22] "GET /api/status HTTP/1.1" 200 -
-INFO:werkzeug:127.0.0.1 - - [15/Feb/2026 11:52:22] "GET /api/status HTTP/1.1" 200 -
+WARNING:root:SapBERT起動中... (2/3)
+WARNING:root:Retrying in 20s...
+127.0.0.1 - - [15/Feb/2026 13:07:24] "POST /api/query HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [15/Feb/2026 13:07:24] "POST /api/query HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 13:07:43] "GET /api/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [15/Feb/2026 13:07:43] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 13:17:21] "POST /api/query HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [15/Feb/2026 13:17:21] "POST /api/query HTTP/1.1" 200 -

@@ -104,44 +104,45 @@ def encode_via_openrouter(text):
         raise RuntimeError(f"Failed to generate E5 embedding: {e}")
 
 
-def encode_via_hf_dedicated(text, max_retries=5):
+def encode_via_hf_dedicated(text, max_retries=3, progress_cb=None):
     """
     Generate SapBERT embedding using HF Dedicated Endpoint with retry logic for cold start
-    
+
     Args:
         text: Text to encode
-        max_retries: Maximum number of retries for 503 errors (default: 5)
-    
+        max_retries: Maximum number of retries for 503 errors (default: 3)
+        progress_cb: Optional callback(msg) called on cold start progress
+
     Returns:
         numpy array of embedding (768-dim)
     """
     if not SAPBERT_ENDPOINT:
         raise RuntimeError("SAPBERT_ENDPOINT not set in .env")
-    
+
     if not HF_TOKEN:
         raise RuntimeError("HF_TOKEN not set in .env")
-    
+
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
     }
-    
+
     payload = {"inputs": text}
-    
+
     for attempt in range(max_retries):
         try:
             response = requests.post(SAPBERT_ENDPOINT, headers=headers, json=payload, timeout=120)
-            
+
             # Handle 503 error (endpoint sleeping / cold start)
             if response.status_code == 503:
-                if attempt == 0:
-                    logging.warning("SapBERT endpoint is sleeping (scale-to-zero). Waking up...")
-                else:
-                    logging.warning(f"SapBERT endpoint still loading... (attempt {attempt+1}/{max_retries})")
-                
+                msg = f"SapBERT起動中... ({attempt+1}/{max_retries})" if attempt > 0 else "SapBERTエンドポイント起動中..."
+                if progress_cb:
+                    progress_cb(msg)
+                logging.warning(msg)
+
                 if attempt < max_retries - 1:
-                    # Exponential backoff: 10s, 20s, 40s, 80s, 160s
-                    wait_time = min(10 * (2 ** attempt), 160)
+                    # Exponential backoff: 10s, 20s, 40s (max 60s, total: 70s)
+                    wait_time = min(10 * (2 ** attempt), 60)
                     logging.warning(f"Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
@@ -503,7 +504,7 @@ def search_medical_papers(query, top_k=10):
     }
 
 
-def search_atomic_facts(query, limit=5, paper_ids=None):
+def search_atomic_facts(query, limit=5, paper_ids=None, progress_cb=None):
     """
     Search atomic facts collection by vector similarity
     CRITICAL FIX: Strictly filters by paper_ids if provided to avoid noise.
@@ -518,7 +519,7 @@ def search_atomic_facts(query, limit=5, paper_ids=None):
     logger.info(f"Searching atomic_facts...")
     
     # Generate Query Vector using HF Dedicated Endpoint (SapBERT)
-    query_vec = encode_via_hf_dedicated(query)
+    query_vec = encode_via_hf_dedicated(query, progress_cb=progress_cb)
     query_vec = np.array(query_vec)
     
     try:

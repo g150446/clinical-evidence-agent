@@ -11,16 +11,16 @@ import argparse
 import re
 import os
 
-def query_ollama(prompt, model="medgemma", temperature=0.0):
+def query_ollama(prompt, model="medgemma", temperature=0.0, progress_cb=None):
     """
     Base function to query MedGemma - now uses HF Dedicated Endpoint instead of Ollama.
     Legacy name kept for compatibility.
     """
     # Redirect to HF endpoint
-    return query_huggingface(prompt, max_new_tokens=1024, temperature=temperature)
+    return query_huggingface(prompt, max_new_tokens=1024, temperature=temperature, progress_cb=progress_cb)
 
 
-def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=5):
+def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=3, progress_cb=None):
     """Query Hugging Face Dedicated Endpoint for MedGemma (OpenAI-compatible API)"""
     from pathlib import Path
     from dotenv import load_dotenv
@@ -62,21 +62,19 @@ def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=
 
             # Check for 503 error (endpoint sleeping)
             if response.status_code == 503:
-                if attempt == 0:
-                    print("HFエンドポイントはスリープ状態です。起動中...")
-                    print("(Scale-to-zero設定により、しばらく使用がないとスリープします)")
-                else:
-                    print(f"起動待機中... ({attempt}/{max_retries-1})")
+                msg = f"MedGemma起動中... ({attempt+1}/{max_retries})" if attempt > 0 else "MedGemmaエンドポイント起動中..."
+                if progress_cb:
+                    progress_cb(msg)
+                print(msg)
 
                 if attempt < max_retries - 1:
-                    # Exponential backoff: 30s, 60s, 120s, 120s, 120s...
-                    wait_time = min(30 * (2 ** attempt), 120)
+                    # Exponential backoff: 30s, 60s (max 60s, total: 30+60+60=150s)
+                    wait_time = min(30 * (2 ** attempt), 60)
                     print(f"  {wait_time}秒後に再試行します...")
                     time.sleep(wait_time)
                     continue
                 else:
-                    print("✗ 最大リトライ回数に達しました。エンドポイントの起動に時間がかかりすぎています。")
-                    return ""
+                    raise RuntimeError("MedGemmaエンドポイントが起動しませんでした。しばらく後に再試行してください。")
 
             response.raise_for_status()
             result = response.json()
@@ -90,7 +88,7 @@ def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=
                 if len(result['choices']) > 0:
                     content = result['choices'][0].get('message', {}).get('content', '')
                     return content.strip()
-            
+
             # Fallback for unexpected format
             print(f"Warning: Unexpected response format: {result}")
             return str(result).strip()
@@ -98,18 +96,16 @@ def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=
         except requests.exceptions.RequestException as e:
             # Network errors - retry
             if attempt < max_retries - 1:
-                wait_time = min(30 * (2 ** attempt), 120)
+                wait_time = min(30 * (2 ** attempt), 60)
                 print(f"接続エラー: {e}")
                 print(f"  {wait_time}秒後に再試行します... ({attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
             else:
-                print(f"Error querying Hugging Face: {e}")
-                return ""
-        except Exception as e:
-            print(f"Error querying Hugging Face: {e}")
-            return ""
+                raise RuntimeError(f"MedGemmaへの接続に失敗しました: {e}")
+        except Exception:
+            raise
 
-    return ""
+    raise RuntimeError("MedGemmaエンドポイントが起動しませんでした。しばらく後に再試行してください。")
 
 def _query_openrouter(messages, max_tokens=256):
     """Call OpenRouter chat completions API (google/gemma-3-27b-it)."""
@@ -221,7 +217,7 @@ Answer:"""
 # ==========================================
 # Phase 1: Map (Individual Paper Analysis)
 # ==========================================
-def analyze_single_paper(paper, related_facts, query, verbose=False, debug=False, use_hf=False):
+def analyze_single_paper(paper, related_facts, query, verbose=False, debug=False, use_hf=False, progress_cb=None):
     """
     MAP FUNCTION: Analyzes ONE paper + its Atomic Facts.
     """
@@ -266,9 +262,9 @@ Answer:"""
 
     # Use Hugging Face or Ollama based on use_hf flag
     if use_hf:
-        response = query_huggingface(prompt, max_new_tokens=512, temperature=0.1)
+        response = query_huggingface(prompt, max_new_tokens=512, temperature=0.1, progress_cb=progress_cb)
     else:
-        response = query_ollama(prompt)
+        response = query_ollama(prompt, progress_cb=progress_cb)
 
     if debug:
         print(f"\n====== DEBUG: Map Response ({metadata.get('title','')[:50]}) ======")
@@ -316,7 +312,7 @@ def _truncate_at_repetition(text):
             seen.add(stripped)
     return '\n'.join(result).strip()
 
-def synthesize_findings(findings, query_en, debug=False, use_hf=False):
+def synthesize_findings(findings, query_en, debug=False, use_hf=False, progress_cb=None):
     if not findings:
         return "No relevant evidence was found."
 
@@ -346,9 +342,9 @@ Answer:"""
 
     # Use Hugging Face or Ollama based on use_hf flag
     if use_hf:
-        raw = query_huggingface(prompt, max_new_tokens=1024, temperature=0.1)
+        raw = query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, progress_cb=progress_cb)
     else:
-        raw = query_ollama(prompt)
+        raw = query_ollama(prompt, progress_cb=progress_cb)
 
     if debug:
         print("\n====== DEBUG: Reduce Response ======")
