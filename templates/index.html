@@ -67,6 +67,7 @@ header span.sub { color: var(--muted); font-size: .85rem; margin-left: auto; }
 }
 .status-dot.ok  { background: var(--accent2); }
 .status-dot.err { background: var(--err); }
+.status-dot.sleeping { background: var(--warn); }
 
 /* ── Main layout ─────────────────────────────────────────────────────── */
 main {
@@ -151,6 +152,42 @@ textarea#query-input:focus { border-color: var(--accent); }
 }
 #run-btn:disabled { opacity: .4; cursor: not-allowed; }
 #run-btn:hover:not(:disabled) { opacity: .85; }
+
+#wakeup-btn {
+  padding: 8px 18px;
+  background: var(--warn);
+  border: none;
+  border-radius: 6px;
+  color: var(--bg);
+  font-weight: 700;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+#wakeup-btn:disabled { opacity: .4; cursor: not-allowed; }
+#wakeup-btn:hover:not(:disabled) { opacity: .85; }
+
+#wakeup-status {
+  font-size: .82rem;
+  color: var(--warn);
+  align-items: center;
+  gap: 6px;
+}
+#wakeup-status.success {
+  color: var(--accent2);
+}
+
+#refresh-btn {
+  padding: 5px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: .75rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+#refresh-btn:hover { border-color: var(--accent); color: var(--text); }
 
 /* ── Progress ────────────────────────────────────────────────────────── */
 #progress-msg {
@@ -372,8 +409,9 @@ textarea#query-input:focus { border-color: var(--accent); }
 
 <!-- Status bar -->
 <div id="status-bar">
-  <span><span class="status-dot" id="dot-ollama"></span>Ollama <span id="lbl-ollama">確認中...</span></span>
-  <span><span class="status-dot" id="dot-qdrant"></span>Qdrant <span id="lbl-qdrant">確認中...</span></span>
+  <span><span class="status-dot" id="dot-sapbert"></span>SapBERT <span id="lbl-sapbert">確認中...</span></span>
+  <span><span class="status-dot" id="dot-medgemma"></span>MedGemma <span id="lbl-medgemma">確認中...</span></span>
+  <button id="refresh-btn" style="margin-left: auto;">状態を更新</button>
 </div>
 
 <main>
@@ -389,11 +427,20 @@ textarea#query-input:focus { border-color: var(--accent); }
         <button class="mode-btn" data-mode="rag">RAG</button>
         <button class="mode-btn" data-mode="compare">Compare</button>
       </div>
+      <button id="wakeup-btn">エンドポイント起動</button>
+      <div id="wakeup-status" style="display:none">
+        <div class="spinner" id="wakeup-spinner"></div>
+        <span id="wakeup-text">起動中...</span>
+        <div id="wakeup-progress-container" style="width: 200px; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-top: 8px;">
+          <div id="wakeup-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.3s ease;"></div>
+        </div>
+        <span id="wakeup-progress-text" style="font-size: 12px; color: #6b7280; margin-top: 4px;">0%</span>
+      </div>
       <div id="progress-msg">
         <div class="spinner"></div>
         <span id="progress-text">処理中...</span>
       </div>
-      <button id="run-btn">実行</button>
+      <button id="run-btn" disabled>実行</button>
     </div>
   </div>
 
@@ -454,31 +501,164 @@ const $  = id => document.getElementById(id);
 const esc = s  => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ── Status ────────────────────────────────────────────────────────────────
-  async function loadStatus() {
+let endpointStatus = { sapbert: 'unknown', medgemma: 'unknown' };
+let wakeupTimer = null;
+let wakeupStartTime = null;
+
+async function loadStatus() {
   try {
     const r = await fetch('/api/status');
     const d = await r.json();
 
-    const setDot = (id, ok, label) => {
-      $(`dot-${id}`).className = `status-dot ${ok ? 'ok' : 'err'}`;
+    const setDot = (id, status, label) => {
+      const cls = status === 'ready' ? 'ok' : (status === 'sleeping' || status === 'starting') ? 'sleeping' : 'err';
+      $(`dot-${id}`).className = `status-dot ${cls}`;
       $(`lbl-${id}`).textContent = label;
     };
 
-    if (d.ollama) {
-      const ok = d.ollama.ok;
-      const models = ok ? d.ollama.models.join(', ') || 'モデルなし' : d.ollama.error;
-      setDot('ollama', ok, ok ? `OK (${models})` : `エラー: ${models}`);
+    // SapBERT
+    if (d.sapbert_endpoint) {
+      const st = d.sapbert_endpoint.status || (d.sapbert_endpoint.ok ? 'ready' : 'error');
+      const label = st === 'ready' ? 'Ready' : st === 'sleeping' ? 'Sleeping' : st === 'starting' ? '起動中' : 'Error';
+      setDot('sapbert', st, label);
+      endpointStatus.sapbert = st;
     }
-    if (d.qdrant) {
-      const ok = d.qdrant.ok;
-      const info = ok ? d.qdrant.collections.join(', ') : d.qdrant.error;
-      setDot('qdrant', ok, ok ? `OK [${info}]` : `エラー: ${info}`);
+
+    // MedGemma
+    if (d.medgemma_endpoint) {
+      const st = d.medgemma_endpoint.status || (d.medgemma_endpoint.ok ? 'ready' : 'error');
+      const label = st === 'ready' ? 'Ready' : st === 'sleeping' ? 'Sleeping' : st === 'starting' ? '起動中' : 'Error';
+      setDot('medgemma', st, label);
+      endpointStatus.medgemma = st;
     }
+
+    return d;
   } catch(e) {
     console.error('status check failed', e);
+    // Update UI to show error status
+    $('dot-sapbert').className = 'status-dot err';
+    $('lbl-sapbert').textContent = 'Error';
+    $('dot-medgemma').className = 'status-dot err';
+    $('lbl-medgemma').textContent = 'Error';
+    endpointStatus = { sapbert: 'error', medgemma: 'error' };
+    return null;
   }
 }
-loadStatus();
+
+async function initStatus() {
+  const d = await loadStatus();
+  updateButtonStates();
+}
+
+function updateButtonStates() {
+  const mode = currentMode;
+  const medReady = endpointStatus.medgemma === 'ready';
+  const sapReady = endpointStatus.sapbert === 'ready';
+
+  const canRun = (mode === 'direct') ? medReady : (medReady && sapReady);
+
+  $('run-btn').disabled = !canRun;
+  // Wakeup button is always visible - removed display toggle
+}
+
+async function refreshStatus() {
+  await loadStatus();
+  updateButtonStates();
+}
+
+async function wakeupEndpoints() {
+  // Check if endpoints are already ready
+  const mode = currentMode;
+  const medReady = endpointStatus.medgemma === 'ready';
+  const sapReady = endpointStatus.sapbert === 'ready';
+  const allReady = (mode === 'direct') ? medReady : (medReady && sapReady);
+  
+  if (allReady) {
+    return; // Already ready, nothing to do
+  }
+  
+  $('wakeup-btn').disabled = true;
+  $('wakeup-status').style.display = 'flex';
+  wakeupStartTime = Date.now();
+
+  // Fire the wake-up ping
+  $('wakeup-text').textContent = '起動リクエスト送信中...';
+  try { 
+    await fetch('/api/wakeup', { method: 'POST' }); 
+    $('wakeup-text').textContent = '起動リクエスト送信完了。状態確認中...';
+  } catch(e) {
+    $('wakeup-text').textContent = '起動リクエスト送信（エラーあり）。状態確認中...';
+  }
+
+  // Initial check immediately
+  await checkEndpointStatus();
+
+  // Start polling every 10 seconds
+  wakeupTimer = setInterval(async () => {
+    await checkEndpointStatus();
+  }, 10000);
+}
+
+async function checkEndpointStatus() {
+  const elapsed = Math.floor((Date.now() - wakeupStartTime) / 1000);
+  
+  // Timeout after 5 minutes
+  if (elapsed > 300) {
+    clearInterval(wakeupTimer);
+    $('wakeup-status').style.display = 'none';
+    $('wakeup-btn').disabled = false;
+    showError('エンドポイントの起動がタイムアウトしました。再試行してください。');
+    return;
+  }
+
+  const d = await loadStatus();
+  if (!d) {
+    $('wakeup-text').textContent = `状態確認失敗 (${elapsed}秒経過)`;
+    return;
+  }
+
+  updateButtonStates();
+
+  // Update progress bar (150 seconds = 100%)
+  const progressPercent = Math.min(100, Math.round((elapsed / 150) * 100));
+  $('wakeup-progress-bar').style.width = `${progressPercent}%`;
+  $('wakeup-progress-text').textContent = `${progressPercent}% (${elapsed}秒経過)`;
+
+  // Build status message
+  const medStatus = endpointStatus.medgemma;
+  const sapStatus = endpointStatus.sapbert;
+  const mode = currentMode;
+  
+  let statusMsg = `MedGemma: ${medStatus}`;
+  if (mode !== 'direct') {
+    statusMsg += `, SapBERT: ${sapStatus}`;
+  }
+  $('wakeup-text').textContent = statusMsg;
+
+  // Check if we're done
+  const medReady = medStatus === 'ready';
+  const sapReady = sapStatus === 'ready';
+  const allReady = (mode === 'direct') ? medReady : (medReady && sapReady);
+
+  if (allReady) {
+    clearInterval(wakeupTimer);
+    const statusEl = $('wakeup-status');
+    statusEl.classList.add('success');
+    $('wakeup-spinner').style.display = 'none';
+    $('wakeup-text').textContent = '✓ すべてのエンドポイントが起動しました';
+    setTimeout(() => {
+      statusEl.style.display = 'none';
+      statusEl.classList.remove('success');
+      $('wakeup-spinner').style.display = 'block';
+    }, 3000);
+    // Keep wakeup button disabled once endpoints are ready
+  }
+}
+
+$('wakeup-btn').addEventListener('click', wakeupEndpoints);
+$('refresh-btn').addEventListener('click', refreshStatus);
+
+initStatus();
 
 // ── Mode selector ─────────────────────────────────────────────────────────
 let currentMode = 'direct';
@@ -487,6 +667,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentMode = btn.dataset.mode;
+    updateButtonStates();
   });
 });
 
@@ -585,6 +766,23 @@ $('query-input').addEventListener('keydown', e => {
 async function runQuery() {
   const queryText = $('query-input').value.trim();
   if (!queryText) { showError('クエリを入力してください'); return; }
+
+  // Pre-flight readiness check
+  const d = await loadStatus();
+  if (d) {
+    const medReady = endpointStatus.medgemma === 'ready';
+    const sapReady = endpointStatus.sapbert === 'ready';
+    const mode = currentMode;
+
+    if (mode === 'direct' && !medReady) {
+      alert('MedGemmaエンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
+      return;
+    }
+    if ((mode === 'rag' || mode === 'compare') && (!medReady || !sapReady)) {
+      alert('エンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
+      return;
+    }
+  }
 
   const btn = $('run-btn');
   btn.disabled = true;

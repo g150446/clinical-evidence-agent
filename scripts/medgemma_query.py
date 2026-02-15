@@ -20,8 +20,13 @@ def query_ollama(prompt, model="medgemma", temperature=0.0, progress_cb=None):
     return query_huggingface(prompt, max_new_tokens=1024, temperature=temperature, progress_cb=progress_cb)
 
 
-def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=3, progress_cb=None):
-    """Query Hugging Face Dedicated Endpoint for MedGemma (OpenAI-compatible API)"""
+def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_wait_seconds=480, progress_cb=None):
+    """Query Hugging Face Dedicated Endpoint for MedGemma (OpenAI-compatible API).
+
+    Uses time-based retry (max_wait_seconds=480 = 8 min) instead of attempt count,
+    so HF Dedicated Endpoint cold starts (typically 2-5 min) are handled reliably
+    in Cloud Run where both the container and endpoint may sleep simultaneously.
+    """
     from pathlib import Path
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
@@ -41,71 +46,73 @@ def query_huggingface(prompt, max_new_tokens=1024, temperature=0.1, max_retries=
         "Content-Type": "application/json"
     }
 
-    # OpenAI-compatible chat format
     payload = {
         "model": "tgi",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_new_tokens,
         "temperature": temperature
     }
 
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                endpoint,
-                headers=headers,
-                json=payload,
-                timeout=120
-            )
+    start_time = time.time()
+    attempt = 0
 
-            # Check for 503 error (endpoint sleeping)
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= max_wait_seconds:
+            raise RuntimeError("MedGemmaエンドポイントが起動しませんでした。しばらく後に再試行してください。")
+
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+
+            # 503: endpoint is sleeping — report progress and retry
             if response.status_code == 503:
-                msg = f"MedGemma起動中... ({attempt+1}/{max_retries})" if attempt > 0 else "MedGemmaエンドポイント起動中..."
+                elapsed_int = int(elapsed)
+                msg = "MedGemmaエンドポイント起動中..." if attempt == 0 else f"MedGemmaエンドポイント起動中... ({elapsed_int}秒経過)"
                 if progress_cb:
                     progress_cb(msg)
                 print(msg)
 
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 30s, 60s (max 60s, total: 30+60+60=150s)
-                    wait_time = min(30 * (2 ** attempt), 60)
-                    print(f"  {wait_time}秒後に再試行します...")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise RuntimeError("MedGemmaエンドポイントが起動しませんでした。しばらく後に再試行してください。")
+                remaining = max_wait_seconds - elapsed
+                wait = min(30, remaining)
+                if wait > 0:
+                    print(f"  {int(wait)}秒後に再試行します...")
+                    _sleep_end = time.time() + wait
+                    while time.time() < _sleep_end:
+                        _nap = min(10, _sleep_end - time.time())
+                        if _nap > 0:
+                            time.sleep(_nap)
+                        if progress_cb:
+                            progress_cb(f"MedGemmaエンドポイント起動中... ({int(time.time() - start_time)}秒経過)")
+                attempt += 1
+                continue
 
             response.raise_for_status()
             result = response.json()
 
-            # Success after retries
             if attempt > 0:
-                print("✓ HFエンドポイントが起動しました！")
+                print(f"✓ HFエンドポイントが起動しました！ ({int(elapsed)}秒)")
 
-            # Extract content from OpenAI-compatible response
-            if isinstance(result, dict) and 'choices' in result:
-                if len(result['choices']) > 0:
-                    content = result['choices'][0].get('message', {}).get('content', '')
-                    return content.strip()
+            if isinstance(result, dict) and 'choices' in result and len(result['choices']) > 0:
+                return result['choices'][0].get('message', {}).get('content', '').strip()
 
-            # Fallback for unexpected format
             print(f"Warning: Unexpected response format: {result}")
             return str(result).strip()
 
         except requests.exceptions.RequestException as e:
-            # Network errors - retry
-            if attempt < max_retries - 1:
-                wait_time = min(30 * (2 ** attempt), 60)
-                print(f"接続エラー: {e}")
-                print(f"  {wait_time}秒後に再試行します... ({attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
+            remaining = max_wait_seconds - (time.time() - start_time)
+            if remaining < 30:
                 raise RuntimeError(f"MedGemmaへの接続に失敗しました: {e}")
+            print(f"接続エラー: {e} — 30秒後に再試行します...")
+            _sleep_end = time.time() + 30
+            while time.time() < _sleep_end:
+                _nap = min(10, _sleep_end - time.time())
+                if _nap > 0:
+                    time.sleep(_nap)
+                if progress_cb:
+                    progress_cb(f"MedGemmaエンドポイント起動中... ({int(time.time() - start_time)}秒経過)")
+            attempt += 1
         except Exception:
             raise
-
-    raise RuntimeError("MedGemmaエンドポイントが起動しませんでした。しばらく後に再試行してください。")
 
 def _query_openrouter(messages, max_tokens=256):
     """Call OpenRouter chat completions API (google/gemma-3-27b-it)."""

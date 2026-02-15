@@ -148,13 +148,29 @@ def status():
     except Exception as exc:
         result['openrouter_api'] = {'ok': False, 'error': str(exc)}
     
-    # HF Dedicated Endpoint (SapBERT embeddings)
-    try:
-        import search_qdrant
-        test_embedding = search_qdrant.encode_via_hf_dedicated("test medical term")
-        result['sapbert_endpoint'] = {'ok': True, 'embedding_dim': len(test_embedding)}
-    except Exception as exc:
-        result['sapbert_endpoint'] = {'ok': False, 'error': str(exc)}
+    # HF Dedicated Endpoint (SapBERT embeddings) - fast probe, no retries
+    sapbert_endpoint = os.getenv('SAPBERT_ENDPOINT')
+    if sapbert_endpoint and HF_TOKEN:
+        try:
+            test_resp = http_requests.post(
+                sapbert_endpoint,
+                headers={
+                    "Authorization": f"Bearer {HF_TOKEN}",
+                    "Content-Type": "application/json"
+                },
+                json={"inputs": "test"},
+                timeout=10
+            )
+            if test_resp.status_code == 200:
+                result['sapbert_endpoint'] = {'ok': True, 'status': 'ready'}
+            elif test_resp.status_code == 503:
+                result['sapbert_endpoint'] = {'ok': True, 'status': 'sleeping'}
+            else:
+                result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'status_code': test_resp.status_code}
+        except Exception as exc:
+            result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'error': str(exc)}
+    else:
+        result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'configured': False}
     
     # MedGemma HF Endpoint (test actual connectivity)
     if USE_HF_ENDPOINT and MEDGEMMA_ENDPOINT:
@@ -174,19 +190,61 @@ def status():
                 timeout=10
             )
             if test_resp.status_code == 200:
-                result['medgemma_endpoint'] = {'ok': True, 'status': 'ready', 'endpoint': MEDGEMMA_ENDPOINT}
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'ready'}
             elif test_resp.status_code == 503:
-                result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping (will wake on query)', 'endpoint': MEDGEMMA_ENDPOINT}
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping'}
+            elif test_resp.status_code in (502, 504, 429, 408):
+                # Temporary errors during startup (gateway not ready, rate limit, timeout)
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'starting'}
             else:
-                result['medgemma_endpoint'] = {'ok': False, 'status_code': test_resp.status_code, 'error': test_resp.text[:200]}
+                result['medgemma_endpoint'] = {'ok': False, 'status': 'error', 'status_code': test_resp.status_code, 'error': test_resp.text[:200]}
         except Exception as exc:
-            result['medgemma_endpoint'] = {'ok': False, 'error': str(exc)}
+            result['medgemma_endpoint'] = {'ok': False, 'status': 'error', 'error': str(exc)}
     elif MEDGEMMA_ENDPOINT:
         result['medgemma_endpoint'] = {'ok': True, 'configured': True, 'endpoint': MEDGEMMA_ENDPOINT}
     else:
         result['medgemma_endpoint'] = {'ok': False, 'configured': False, 'note': 'Using local Ollama fallback'}
     
     return jsonify(result)
+
+
+@app.route('/api/wakeup', methods=['POST'])
+def wakeup():
+    """
+    Send a ping to sleeping HF endpoints to trigger auto-scaler startup.
+    Returns immediately -- does not wait for readiness.
+    Frontend should poll /api/status to detect when endpoints become ready.
+    """
+    results = {}
+    
+    # Ping SapBERT
+    sapbert_endpoint = os.getenv('SAPBERT_ENDPOINT')
+    if sapbert_endpoint and HF_TOKEN:
+        try:
+            resp = http_requests.post(
+                sapbert_endpoint,
+                headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+                json={"inputs": "test"},
+                timeout=10
+            )
+            results['sapbert'] = 'ready' if resp.status_code == 200 else 'waking'
+        except Exception:
+            results['sapbert'] = 'ping_sent'
+    
+    # Ping MedGemma
+    if MEDGEMMA_ENDPOINT and HF_TOKEN:
+        try:
+            resp = http_requests.post(
+                f"{MEDGEMMA_ENDPOINT}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+                json={"model": "tgi", "messages": [{"role": "user", "content": "test"}], "max_tokens": 5},
+                timeout=10
+            )
+            results['medgemma'] = 'ready' if resp.status_code == 200 else 'waking'
+        except Exception:
+            results['medgemma'] = 'ping_sent'
+    
+    return jsonify(results)
 
 
 @app.route('/api/query', methods=['POST'])
@@ -249,7 +307,11 @@ def query():
                 threading.Thread(target=_facts_thread, daemon=True).start()
                 all_facts = []
                 while True:
-                    item = _facts_q.get(timeout=120)
+                    try:
+                        item = _facts_q.get(timeout=15)
+                    except queue.Empty:
+                        yield sse({'type': 'progress', 'message': 'データベース検索中...'})
+                        continue
                     if item['type'] == '__done__':
                         break
                     elif item['type'] == 'progress':
@@ -306,7 +368,7 @@ def query():
                 rag_answer, contributing_papers = None, []
                 while True:
                     try:
-                        item = _mr_q.get(timeout=70)
+                        item = _mr_q.get(timeout=15)
                     except queue.Empty:
                         yield sse({'type': 'progress', 'message': 'エンドポイント起動待機中...'})
                         continue
@@ -425,8 +487,10 @@ def query():
 
         except http_requests.exceptions.ConnectionError:
             yield sse({'type': 'error', 'message': 'Ollama に接続できません。localhost:11434 が起動しているか確認してください。'})
+            yield sse({'type': 'done', 'mode': mode})
         except Exception as exc:
             yield sse({'type': 'error', 'message': str(exc)})
+            yield sse({'type': 'done', 'mode': mode})
 
     return Response(
         stream_with_context(generate()),

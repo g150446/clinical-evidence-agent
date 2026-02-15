@@ -144,7 +144,13 @@ def encode_via_hf_dedicated(text, max_retries=3, progress_cb=None):
                     # Exponential backoff: 10s, 20s, 40s (max 60s, total: 70s)
                     wait_time = min(10 * (2 ** attempt), 60)
                     logging.warning(f"Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
+                    _sleep_end = time.time() + wait_time
+                    while time.time() < _sleep_end:
+                        _nap = min(10, _sleep_end - time.time())
+                        if _nap > 0:
+                            time.sleep(_nap)
+                        if progress_cb:
+                            progress_cb("SapBERTエンドポイント起動中...")
                     continue
                 else:
                     raise RuntimeError("SapBERT endpoint failed to wake up after maximum retries")
@@ -176,7 +182,13 @@ def encode_via_hf_dedicated(text, max_retries=3, progress_cb=None):
         except requests.exceptions.RequestException as e:
             if attempt < max_retries - 1:
                 logging.warning(f"Request failed: {e}. Retrying...")
-                time.sleep(10)
+                _sleep_end = time.time() + 10
+                while time.time() < _sleep_end:
+                    _nap = min(10, _sleep_end - time.time())
+                    if _nap > 0:
+                        time.sleep(_nap)
+                    if progress_cb:
+                        progress_cb("SapBERTエンドポイント起動中...")
                 continue
             else:
                 logging.error(f"HF Dedicated Endpoint error after {max_retries} attempts: {e}")

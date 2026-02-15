@@ -25,5 +25,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Start command
 # Note: No embedding models are loaded - uses Embedding Service API
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 300 app:app
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 600 app:app
 

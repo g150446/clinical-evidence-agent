@@ -27,9 +27,11 @@ An intelligent medical evidence retrieval system combining:
   ├─ GET  /api/status → Health check
   ├─ POST /api/query → Main API (streaming)
   │
-  ├─→ [OpenRouter API] 
-  │     └─ Model: intfloat/multilingual-e5-large (1024-dim)
-  │     └─ Purpose: Query embedding generation for paper search
+  ├─→ [OpenRouter API]
+  │     ├─ Model: intfloat/multilingual-e5-large (1024-dim)
+  │     │  └─ Purpose: Query embedding generation for paper search
+  │     └─ Model: google/gemma-3-27b-it
+  │        └─ Purpose: Japanese-English bidirectional translation
   │
   ├─→ [Hugging Face Dedicated Endpoint]
   │     └─ Model: cambridgeltl/SapBERT-from-PubMedBERT-fulltext (768-dim)
@@ -39,14 +41,14 @@ An intelligent medical evidence retrieval system combining:
   │     └─ Collections: medical_papers (3 vectors), atomic_facts (1 vector)
   │     └─ Region: us-east4-0 (GCP)
   │
-  └─→ [Hugging Face Endpoint: MedGemma 7b]
+  └─→ [Hugging Face Endpoint: MedGemma]
         └─ Purpose: Medical inference with streaming support
 ```
 
 ### Data Preparation Phase (One-Time, Local Mac)
 ```
 [Local Mac]
-  ├─ scripts/structure_paper.py → 5-layer JSON structuring
+  ├─ scripts/structure_paper.py → 3-layer JSON structuring
   ├─ scripts/generate_embeddings.py → Create embeddings offline
   └─→ Upload to [Qdrant Cloud] (one-time data preparation)
 ```
@@ -63,7 +65,11 @@ An intelligent medical evidence retrieval system combining:
 ## System Architecture (Query Flow)
 
 ```
-User Query (EN)
+User Query (JP/EN)
+    ↓
+[0] Translation (if Japanese)
+    ├─ OpenRouter API: google/gemma-3-27b-it
+    │  └─ Purpose: JP→EN query translation
     ↓
 [1] Query Embedding Generation
     ├─ OpenRouter API: multilingual-e5-large (1024-dim)
@@ -73,17 +79,21 @@ User Query (EN)
     ├── Stage 1: Vector Similarity (top 30 candidates via scroll API)
     └── Stage 2: Keyword Reranking (medical term bonus scores)
     ↓
-[3] Top 3 Papers + Atomic Facts Retrieval
-    ↓
-[4] Map-Reduce Analysis (MedGemma 7b via HF Endpoint)
-    ├── Phase 1 (Map): Analyze each paper individually
-    │   ├── Extract drug name and numerical outcomes
-    │   └── Filter irrelevant papers
-    └── Phase 2 (Reduce): Synthesize findings
-        └── Generate comprehensive English answer
-    ↓
-Comprehensive Medical Answer (streamed via SSE)
-```
+ [3] Top 3 Papers + Atomic Facts Retrieval
+     ↓
+ [4] Map-Reduce Analysis (MedGemma via HF Endpoint)
+     ├── Phase 1 (Map): Analyze each paper individually
+     │   ├── Extract drug name and numerical outcomes
+     │   └─ Filter irrelevant papers
+     └─ Phase 2 (Reduce): Synthesize findings
+         └─ Generate comprehensive English answer
+     ↓
+ [5] Translation (if original query was Japanese)
+     └─ OpenRouter API: google/gemma-3-27b-it
+        └─ Purpose: EN→JP answer translation
+     ↓
+ Comprehensive Medical Answer (streamed via SSE)
+ ```
 
 **Performance Metrics**:
 - Query embedding generation: ~100-300ms (API calls)
@@ -137,19 +147,17 @@ Comprehensive Medical Answer (streamed via SSE)
 ### Data Structuring Scripts
 
 #### `scripts/structure_paper.py`
-**Purpose**: Structure single paper using LLM into 5-layer JSON schema with 2-stage processing
+**Purpose**: Structure single paper using LLM into 3-layer JSON schema with 2-stage processing
 
 **Input**: Subsection papers from `data/obesity/{domain}/{subsection}/papers.json` (with optional `full_text` field from `append_fulltext.py`)
 
 **Output**: Structured JSON with:
 - **Layer A**: Language-independent core (PICO_EN, atomic_facts_EN, limitations)
 - **Layer B**: Multilingual interface (generated questions in EN only)
-- **Layer C**: Cross references (empty for now)
-- **Layer D**: Embeddings metadata (targets for models)
-- **Layer E**: MeSH terminology (English synonyms only)
+- **Layer C**: Embeddings metadata (targets for models)
 
 **Workflow (2-Stage Processing)**:
-**Stage 1**: Generate metadata, PICO, questions (EN), MeSH, quantitative data, limitations
+**Stage 1**: Generate metadata, PICO, questions (EN), quantitative data, limitations
 1. Extract sample size from abstract text
 2. Extract full text if available (from `append_fulltext.py`)
 3. Prepare prompt with all metadata (including full text if available)
@@ -267,7 +275,7 @@ python3 scripts/download_remaining_pharmacologic.py pharmacologic
 - Batch processing: Processes PMIDs in batches (default: 50 per batch)
 - API rate limiting: Sleep 1 second between batches
 - Duplicate handling: Merge new data with existing papers
-- Metadata extraction: Title, abstract, authors, journal, year, MeSH terms
+- Metadata extraction: Title, abstract, authors, journal, year
 
 **Note**: This script was used to complete the pharmacologic domain to 100 papers
 
@@ -589,7 +597,7 @@ python3 scripts/append_fulltext.py pharmacologic glp1_receptor_agonists
 
 **Ollama Integration**:
 - URL: `http://localhost:11434/api` (configurable via OLLAMA_URL env var)
-- Model: `medgemma:7b` (configurable)
+- Model: `medgemma` (configurable)
 - Timeout: 60 seconds
 - Stream: False (wait for full response)
 
@@ -724,22 +732,22 @@ data/obesity/
 ├── pharmacologic/
 │   ├── glp1_receptor_agonists/
 │   │   ├── papers.json                    # Simple format (pmid, title, abstract, journal, year)
-│   │   └── papers/                         # 5-layer structured JSON files
+│   │   └── papers/                         # 3-layer structured JSON files
 │   │       ├── PMID_37952131.json      # PICO + atomic facts + embeddings metadata
 │   │       ├── PMID_33567185.json
 │   │       └── ...
 │   ├── guidelines_and_reviews/
 │   │   ├── papers.json
-│   │   └── papers/                         # 5-layer structured files
+│   │   └── papers/                         # 3-layer structured files
 │   │       └── PMID_38629387.json
 │   └── novel_agents/
 │       ├── papers.json
-│       └── papers/                         # 5-layer structured files
+│       └── papers/                         # 3-layer structured files
 │           └── PMID_35658024.json
 ├── lifestyle/
 │   ├── dietary_interventions/
 │   │   ├── papers.json
-│   │   └── papers/                         # 5-layer structured files
+│   │   └── papers/                         # 3-layer structured files
 │   ├── physical_activity/
 │   │   ├── papers.json
 │   │   └── papers/
@@ -749,7 +757,7 @@ data/obesity/
 ├── surgical/
 │   ├── procedures_and_outcomes/
 │   │   ├── papers.json
-│   │   └── papers/                         # 5-layer structured files
+│   │   └── papers/                         # 3-layer structured files
 │   ├── metabolic_effects/
 │   │   ├── papers.json
 │   │   └── papers/
@@ -760,7 +768,7 @@ data/obesity/
 
 **Two file formats**:
 - `papers.json`: Simple format for raw downloaded papers (pmid, title, abstract, journal, year)
-- `papers/PMID_XXX.json`: 5-layer structured format with PICO, atomic facts, questions (EN), limitations
+- `papers/PMID_XXX.json`: 3-layer structured format with PICO, atomic facts, questions (EN), limitations
 
 ```
 
@@ -770,22 +778,22 @@ clinical-evidence-agent/
 │       ├── pharmacologic/
 │       │   ├── glp1_receptor_agonists/
 │       │   │   ├── papers.json                    # Simple format (pmid, title, abstract, journal, year)
-│       │   │   └── papers/                         # 5-layer structured JSON files
+│       │   │   └── papers/                         # 3-layer structured JSON files
 │       │   │       ├── PMID_37952131.json      # PICO + atomic facts + embeddings metadata
 │       │   │       ├── PMID_33567185.json
 │       │   │       └── ...
 │       │   ├── guidelines_and_reviews/
 │       │   │   ├── papers.json
-│       │   │   └── papers/                         # 5-layer structured files
+│       │   │   └── papers/                         # 3-layer structured files
 │       │   │       └── PMID_38629387.json
 │       │   └── novel_agents/
 │       │       ├── papers.json
-│       │       └── papers/                         # 5-layer structured files
+│       │       └── papers/                         # 3-layer structured files
 │       │           └── PMID_35658024.json
 │       ├── lifestyle/
 │       │   ├── dietary_interventions/
 │       │   │   ├── papers.json
-│       │   │   └── papers/                         # 5-layer structured files
+│       │   │   └── papers/                         # 3-layer structured files
 │       │   ├── physical_activity/
 │       │   │   ├── papers.json
 │       │   │   └── papers/
@@ -795,7 +803,7 @@ clinical-evidence-agent/
 │       ├── surgical/
 │       │   ├── procedures_and_outcomes/
 │       │   │   ├── papers.json
-│       │   │   └── papers/                         # 5-layer structured files
+│       │   │   └── papers/                         # 3-layer structured files
 │       │   ├── metabolic_effects/
 │       │   │   ├── papers.json
 │       │   │   └── papers/
@@ -832,7 +840,7 @@ clinical-evidence-agent/
 - **Script**: `fetch_paper_details.py`
 - **Output**: `papers.json` files for each subcategory in each domain
 - **Coverage**: Process all papers across all subsections
-- **Metadata**: Title, abstract, authors, journal, year, MeSH terms
+- **Metadata**: Title, abstract, authors, journal, year
 
 - **Optional Step**: `append_fulltext.py` (Recommended but optional)
   - **Purpose**: Retrieve full text content from PMC and append to existing papers
@@ -847,7 +855,7 @@ clinical-evidence-agent/
 - **Input**: `papers.json` files from all subsections in each domain (with optional `full_text` field)
 
 **2-Stage Architecture**:
-**Stage 1**: Generate metadata, PICO, generated questions (EN), MeSH terminology, quantitative data, limitations, and cross references
+**Stage 1**: Generate metadata, PICO, generated questions (EN), quantitative data, limitations
 - Uses `STAGE1_PROMPT` in structure_paper.py
 - Generates structured JSON without atomic_facts_en and embeddings_metadata
 - API calls: 1 per paper with max_tokens=16384
@@ -861,9 +869,9 @@ clinical-evidence-agent/
 
 **Merge Stage 1 + Stage 2**:
 - Combines Stage 1 and Stage 2 results into final structured JSON
-- Output: Full 5-layer schema with atomic_facts_en from Stage 2
+- Output: Full 3-layer schema with atomic_facts_en from Stage 2
 
-- **Output**: Structured JSON files with 5-layer schema in each subsection's `papers/` directory
+- **Output**: Structured JSON files with 3-layer schema in each subsection's `papers/` directory
 - **Coverage**: Process all papers across all subsections
 - **Time**: ~3 hours for all domains (Stage 1: ~2 hours, Stage 2: ~1 hour)
 - **Success Rate**: 100% (no failures)
@@ -888,13 +896,13 @@ clinical-evidence-agent/
 - **Input**: User query (English)
 - **Output**: Top 5 papers ranked by similarity
 - **Performance**: ~400ms search time
-- **Database**: 298 papers with full vectors
+- **Database**: Papers with full vectors
 - **Language**: English only (removed Japanese query handling)
 
 ### 5. MedGemma Query (Phase 4)
 - **Script**: `medgemma_query.py` + `integrate_system.py`
 - **Modes**: Direct, RAG-enhanced (Map-Reduce architecture)
-- **Models**: `medgemma:7b` (via Ollama)
+- **Models**: `medgemma` (via Ollama)
 - **Language**: English only (removed Japanese translation)
 - **Features**: Evidence-based answers with citations
 - **Architecture**: Map-Reduce RAG
@@ -925,10 +933,16 @@ clinical-evidence-agent/
 4. `sapbert_fact` (768) - Step 2: Atomic facts
 
 ### LLM Model
-- **MedGemma 7b**: `medgemma:7b` (via Ollama)
+- **MedGemma**: `medgemma` (via Ollama)
   - Context Window: 4096 tokens (RAG mode)
   - Temperature: 0.3
   - Capabilities: Medical knowledge, reasoning, evidence synthesis
+
+- **Translation**: OpenRouter API
+  - Model: `google/gemma-3-27b-it`
+  - Purpose: Japanese-English bidirectional translation
+  - Used for: Query translation (JP→EN), Answer translation (EN→JP)
+  - Implementation: `scripts/medgemma_query.py:110-172`
 
 ### Vector Database
 - **Qdrant**: Open-source vector similarity search engine
@@ -948,7 +962,7 @@ clinical-evidence-agent/
 
 ### Ollama (MedGemma)
 - **Base URL**: `http://localhost:11434/api` (configurable via OLLAMA_URL env var)
-- **Model**: `medgemma:7b` (7B parameter model)
+- **Model**: `medgemma`
 - **Timeout**: 60 seconds
 - **Stream**: False (wait for full response)
 
@@ -1038,8 +1052,8 @@ clinical-evidence-agent/
 # Ollama URL (default: http://localhost:11434/api)
 export OLLAMA_URL="http://localhost:11434/api"
 
-# MedGemma model (default: medgemma:7b)
-export OLLAMA_MODEL="medgemma:7b"
+# MedGemma model (default: medgemma)
+export OLLAMA_MODEL="medgemma"
 ```
 
 ### Database Initialization
@@ -1304,7 +1318,7 @@ Yes, clinical evidence demonstrates that semaglutide is effective for long-term 
 ## Troubleshooting
 
 ### Issue: MedGemma Model Not Available
-**Error**: `medgemma:7b` not found in Ollama
+**Error**: `medgemma` not found in Ollama
 
 **Solution**:
 1. Check available models:
@@ -1320,7 +1334,7 @@ OLLAMA_MODEL = "medgemma:latest"  # or other available model
 
 3. Pull model if needed:
 ```bash
-ollama pull medgemma:7b
+ollama pull medgemma
 ```
 
 ### Issue: Qdrant Search Returns No Results
@@ -1365,8 +1379,8 @@ print(f'Payload: {scroll_result[0][0].payload}')
 ## Development Status
 
 ### Completed Components ✅
-- [x] **Phase 1**: Data Structuring (298/298 papers)
-- [x] **Phase 2**: Embeddings Generation (298 papers × 4 vectors)
+- [x] **Phase 1**: Data Structuring
+- [x] **Phase 2**: Embeddings Generation
 - [x] **Phase 3**: Search Pipeline (Qdrant search)
 - [x] **Phase 4**: Full Integration (Qdrant + MedGemma)
 
@@ -1383,13 +1397,13 @@ print(f'Payload: {scroll_result[0][0].payload}')
   - integrate_system.py: English-only responses
 
 ### Known Issues ⚠️
-- [ ] **MedGemma Model**: `medgemma:7b` needs to be available in Ollama
+- [ ] **MedGemma Model**: `medgemma` needs to be available in Ollama
 
 ### Next Steps 🔜
 - [ ] **Deploy** System to production environment
 - [ ] **Test** End-to-end workflow with real users
 - [ ] **Optimize** Performance (faster Qdrant search, better caching)
-- [ ] **Extend** Database with more papers (beyond 298)
+- [ ] **Extend** Database with more papers
 
 ---
 
@@ -1505,7 +1519,7 @@ gcloud run services delete clinical-evidence-backend \
 - **`scripts/fetch_paper_details.py`**: Abstract parsing now preserves PubMed section labels
   - `<AbstractText Label="BACKGROUND">` → stored as `BACKGROUND: text\n\nMETHODS: text\n\n...`
   - Unstructured abstracts (no Label attribute) remain a single plain-text block
-  - All domains re-fetched: pharmacologic (150 papers), surgical (65), lifestyle (64)
+  - All domains re-fetched: pharmacologic, surgical, lifestyle
 - **`templates/index.html`**: Abstract modal redesigned for readability
   - Added `formatAbstract()` JS function: splits on `\n\n`, detects `LABEL:` prefix
   - Structured abstracts rendered with blue uppercase section headers (`.abstract-label`)
@@ -1526,7 +1540,7 @@ gcloud run services delete clinical-evidence-backend \
   - Changed API calls to relative paths (`/api/status`, `/api/query`)
   - No separate environment variables needed
 - **Cloud APIs Migration**:
-  - Replaced local Ollama with HF Endpoint (MedGemma 7b)
+  - Replaced local Ollama with HF Endpoint (MedGemma)
   - Replaced local embedding models with APIs:
     - OpenRouter API: `intfloat/multilingual-e5-large` (1024-dim)
     - HF Dedicated Endpoint: `cambridgeltl/SapBERT-from-PubMedBERT-fulltext` (768-dim)
@@ -1615,7 +1629,7 @@ gcloud run services delete clinical-evidence-backend \
   - `README.md`: Updated search workflow with priority order explanation
 
 ### v1.0 (2026-02-02) - Initial System
-- Data structuring for 298 papers
+- Data structuring
 - Embedding generation for all papers (5 types per paper)
 - Qdrant search pipeline with real models
 - MedGemma integration (direct and RAG)
@@ -1626,7 +1640,7 @@ gcloud run services delete clinical-evidence-backend \
 ## Summary
 
 This clinical evidence agent provides a comprehensive solution for retrieving medical evidence using:
-- **Vector similarity search** across 298 structured medical papers
+- **Vector similarity search** across structured medical papers
 - **Map-Reduce RAG architecture** with MedGemma synthesis
 - **English-only support** with high-quality, self-contained atomic facts
 - **2-stage processing** for improved atomic fact generation
@@ -1635,7 +1649,7 @@ This clinical evidence agent provides a comprehensive solution for retrieving me
 **System Status**: **PRODUCTION READY** ✅
 
 **Key Capabilities**:
-- ✅ Search 298 medical papers by semantic similarity
+- ✅ Search medical papers by semantic similarity
 - ✅ Retrieve atomic facts for detailed evidence
 - ✅ Generate comprehensive medical answers using MedGemma
 - ✅ English-only queries, embeddings, and responses
