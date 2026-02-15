@@ -11,7 +11,7 @@ REGION="asia-northeast1"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
 # Cloud Run設定
-MEMORY="256Mi"
+MEMORY="512Mi"
 CPU="1"
 TIMEOUT="600s"  # 10分に延長（HF Endpoint cold start対策）
 MAX_INSTANCES="10"

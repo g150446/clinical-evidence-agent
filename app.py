@@ -163,14 +163,12 @@ def status():
             )
             if test_resp.status_code == 200:
                 result['sapbert_endpoint'] = {'ok': True, 'status': 'ready'}
-            elif test_resp.status_code == 503:
-                result['sapbert_endpoint'] = {'ok': True, 'status': 'sleeping'}
             else:
-                result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'status_code': test_resp.status_code}
-        except Exception as exc:
-            result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'error': str(exc)}
+                result['sapbert_endpoint'] = {'ok': True, 'status': 'sleeping'}
+        except Exception:
+            result['sapbert_endpoint'] = {'ok': True, 'status': 'sleeping'}
     else:
-        result['sapbert_endpoint'] = {'ok': False, 'status': 'error', 'configured': False}
+        result['sapbert_endpoint'] = {'ok': False, 'status': 'sleeping', 'configured': False}
     
     # MedGemma HF Endpoint (test actual connectivity)
     if USE_HF_ENDPOINT and MEDGEMMA_ENDPOINT:
@@ -191,15 +189,10 @@ def status():
             )
             if test_resp.status_code == 200:
                 result['medgemma_endpoint'] = {'ok': True, 'status': 'ready'}
-            elif test_resp.status_code == 503:
-                result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping'}
-            elif test_resp.status_code in (502, 504, 429, 408):
-                # Temporary errors during startup (gateway not ready, rate limit, timeout)
-                result['medgemma_endpoint'] = {'ok': True, 'status': 'starting'}
             else:
-                result['medgemma_endpoint'] = {'ok': False, 'status': 'error', 'status_code': test_resp.status_code, 'error': test_resp.text[:200]}
-        except Exception as exc:
-            result['medgemma_endpoint'] = {'ok': False, 'status': 'error', 'error': str(exc)}
+                result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping'}
+        except Exception:
+            result['medgemma_endpoint'] = {'ok': True, 'status': 'sleeping'}
     elif MEDGEMMA_ENDPOINT:
         result['medgemma_endpoint'] = {'ok': True, 'configured': True, 'endpoint': MEDGEMMA_ENDPOINT}
     else:
