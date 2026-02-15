@@ -827,28 +827,6 @@ async function runQuery() {
   resetUI();
   setProgress(true, '接続中...');
 
-  // Pre-flight readiness check
-  setProgress(true, 'エンドポイント状態確認中...');
-  const d = await loadStatus();
-  if (d) {
-    const medReady = endpointStatus.medgemma === 'ready';
-    const sapReady = endpointStatus.sapbert === 'ready';
-    const mode = currentMode;
-
-    if (mode === 'direct' && !medReady) {
-      setProgress(false);
-      btn.disabled = false;
-      alert('MedGemmaエンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
-      return;
-    }
-    if ((mode === 'rag' || mode === 'compare') && (!medReady || !sapReady)) {
-      setProgress(false);
-      btn.disabled = false;
-      alert('エンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
-      return;
-    }
-  }
-
   setProgress(true, 'クエリ送信中...');
 
   const mode = currentMode;
