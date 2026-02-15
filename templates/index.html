@@ -591,6 +591,19 @@ async function runQuery() {
             appendToken($('body-direct'), evt.token);
             break;
 
+          case 'references': {
+            const bodyId = (mode === 'compare') ? 'body-rag' : 'body-single';
+            const bodyEl = $(bodyId);
+            removeCursor(bodyEl);
+            let refText = '\n\n参考論文:';
+            (evt.papers || []).forEach((p, i) => {
+              refText += `\n  [${i+1}] ${p.title || p.paper_id}`;
+              refText += `\n      ${p.paper_id} | ${p.journal || ''} | ${p.year || ''}`;
+            });
+            bodyEl.insertAdjacentText('beforeend', refText);
+            break;
+          }
+
           case 'done':
             setProgress(false);
             // remove all cursors

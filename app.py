@@ -258,12 +258,14 @@ def query():
                         facts_by_paper[pid].append(fact)
 
                 valid_findings = []
+                contributing_papers = []
                 for paper in papers:
                     pid = str(paper.get('paper_id'))
                     related_facts = facts_by_paper.get(pid, [])
                     result = medgemma_query.analyze_single_paper(paper, related_facts, search_query)
                     if result:
                         valid_findings.append(result)
+                        contributing_papers.append(paper)
 
                 # Step 4: Reduce phase — synthesize into final answer
                 yield sse({'type': 'progress', 'message': '回答を統合中... (Reduce phase)'})
@@ -280,6 +282,19 @@ def query():
             if mode == 'compare':
                 for line in rag_answer.split('\n'):
                     yield sse({'type': 'rag_token', 'token': line + '\n'})
+                if contributing_papers:
+                    yield sse({
+                        'type': 'references',
+                        'papers': [
+                            {
+                                'paper_id': p.get('paper_id', ''),
+                                'title': p.get('metadata', {}).get('title', ''),
+                                'journal': p.get('metadata', {}).get('journal', ''),
+                                'year': p.get('metadata', {}).get('publication_year', ''),
+                            }
+                            for p in contributing_papers
+                        ]
+                    })
 
                 # Translate query for direct mode if Japanese
                 import re
@@ -310,6 +325,19 @@ def query():
             # ── Single mode: direct or RAG ────────────────────────────────
             if mode == 'rag':
                 yield sse({'type': 'token', 'token': rag_answer})
+                if contributing_papers:
+                    yield sse({
+                        'type': 'references',
+                        'papers': [
+                            {
+                                'paper_id': p.get('paper_id', ''),
+                                'title': p.get('metadata', {}).get('title', ''),
+                                'journal': p.get('metadata', {}).get('journal', ''),
+                                'year': p.get('metadata', {}).get('publication_year', ''),
+                            }
+                            for p in contributing_papers
+                        ]
+                    })
             else:
                 # Direct mode: translate query if Japanese, then translate answer back
                 import re
