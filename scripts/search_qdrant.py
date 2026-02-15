@@ -411,7 +411,8 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None
                         'paper_id': point.payload.get('paper_id', ''),
                         'score': float(base_score),
                         'pico_en': point.payload.get('pico_en', {}),
-                        'metadata': point.payload.get('metadata', {})
+                        'metadata': point.payload.get('metadata', {}),
+                        'abstract': point.payload.get('abstract', ''),
                     }
                     
                     bonus = calculate_keyword_bonus(paper, keywords)
@@ -445,7 +446,8 @@ def search_by_vector_similarity(query_vec, collection_name, limit=10, query=None
                 'paper_id': point.payload.get('paper_id', ''),
                 'score': float(score),
                 'pico_en': point.payload.get('pico_en', {}),
-                'metadata': point.payload.get('metadata', {})
+                'metadata': point.payload.get('metadata', {}),
+                'abstract': point.payload.get('abstract', ''),
             })
         
         seen = set()
@@ -635,7 +637,11 @@ if __name__ == '__main__':
         print(f"   ジャーナル: {journal}")
         if year and year != 'N/A':
             print(f"   年: {year}")
-    
+        abstract = paper.get('abstract', '')
+        if abstract:
+            preview = abstract[:150] + ('...' if len(abstract) > 150 else '')
+            print(f"   アブストラクト: {preview}")
+
     if len(papers) == 0:
         print("\n関連する論文が見つかりませんでした。")
     

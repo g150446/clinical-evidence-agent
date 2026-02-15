@@ -133,7 +133,15 @@ def parse_article_xml(article_elem):
         title = article_elem.find('.//ArticleTitle').text or "No Title"
         
         abstract_texts = article_elem.findall('.//Abstract/AbstractText')
-        abstract = ' '.join([t.text for t in abstract_texts if t.text]) if abstract_texts else "No Abstract"
+        if abstract_texts:
+            parts = []
+            for t in abstract_texts:
+                if t.text:
+                    label = t.attrib.get('Label', '')
+                    parts.append(f"{label}: {t.text}" if label else t.text)
+            abstract = '\n\n'.join(parts)
+        else:
+            abstract = "No Abstract"
         
         journal = article_elem.find('.//Journal/Title').text or ""
         year_elem = article_elem.find('.//PubDate/Year')

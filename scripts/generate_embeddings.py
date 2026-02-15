@@ -203,7 +203,22 @@ def process_paper(paper_path):
 
         # Deterministic UUID from paper_id: re-runs update the same point, no duplicates
         paper_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, paper_id))
-        
+
+        # Look up abstract from papers.json in parent subsection directory
+        abstract = ''
+        papers_json_path = paper_path.parent.parent / 'papers.json'
+        if papers_json_path.exists():
+            papers_raw = json.loads(papers_json_path.read_text(encoding='utf-8'))
+            for raw in papers_raw:
+                pmid_numeric = str(paper_id).replace('PMID_', '')
+                if str(raw.get('pmid', '')) == pmid_numeric:
+                    abstract = raw.get('abstract', '')
+                    break
+
+        if not abstract:
+            print(f"  Skipping {paper_id}: no abstract found")
+            return False
+
         # 5. Upsert to medical_papers collection (3 named vectors)
         client.upsert(
             collection_name="medical_papers",
@@ -220,7 +235,8 @@ def process_paper(paper_path):
                         "paper_id": paper_id,
                         "pico_en": pico,
                         "metadata": metadata,
-                        "mesh_terms": metadata.get('mesh_terms', [])
+                        "mesh_terms": metadata.get('mesh_terms', []),
+                        "abstract": abstract,
                     }
                 )
             ]

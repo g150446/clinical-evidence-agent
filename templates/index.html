@@ -277,6 +277,84 @@ textarea#query-input:focus { border-color: var(--accent); }
   font-size: .88rem;
   display: none;
 }
+
+/* ── References section ──────────────────────────────────────────────── */
+.refs-section {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+}
+.refs-heading {
+  font-size: .75rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .07em;
+  margin-bottom: 8px;
+}
+.refs-item {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+}
+.refs-item:last-child { border-bottom: none; }
+.refs-meta {
+  font-size: .82rem; color: var(--muted); flex: 1;
+}
+.refs-abstract-btn {
+  font-size: .75rem; padding: 2px 8px;
+  border: 1px solid var(--accent); border-radius: 4px;
+  background: none; color: var(--accent);
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.refs-abstract-btn:hover {
+  background: var(--accent); color: #fff;
+}
+
+/* ── Abstract modal ──────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 680px; width: 90%;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: .92rem;
+}
+#modal-close {
+  background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 1rem; flex-shrink: 0;
+}
+#modal-close:hover { color: var(--text); }
+.modal-meta {
+  font-size: .78rem; color: var(--muted);
+  padding: 8px 16px 0;
+}
+.modal-text {
+  padding: 14px 16px;
+  font-size: .88rem; line-height: 1.7;
+  overflow-y: auto;
+  color: var(--text);
+}
+.abstract-section { margin-bottom: 14px; }
+.abstract-section:last-child { margin-bottom: 0; }
+.abstract-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #4f8ef7;
+  margin-bottom: 4px;
+}
 </style>
 </head>
 <body>
@@ -357,6 +435,18 @@ textarea#query-input:focus { border-color: var(--accent); }
   </div>
 
 </main>
+
+<!-- Abstract modal -->
+<div id="abstract-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="modal-title"></span>
+      <button id="modal-close">✕</button>
+    </div>
+    <div id="modal-pmid" class="modal-meta"></div>
+    <div id="modal-body" class="modal-text"></div>
+  </div>
+</div>
 
 <script>
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -449,6 +539,7 @@ function resetUI() {
   $('ctx-facts').innerHTML = '';
   $('ctx-body').classList.remove('open');
   $('ctx-arrow').textContent = '▶';
+  document.querySelectorAll('.refs-section').forEach(el => el.remove());
 }
 
 function renderContext(ctx) {
@@ -592,15 +683,45 @@ async function runQuery() {
             break;
 
           case 'references': {
+            const cardId = (mode === 'compare') ? 'card-rag' : 'card-single';
+            const card = $(cardId);
             const bodyId = (mode === 'compare') ? 'body-rag' : 'body-single';
-            const bodyEl = $(bodyId);
-            removeCursor(bodyEl);
-            let refText = '\n\n参考論文:';
+            removeCursor($(bodyId));
+
+            // Remove any existing refs section (re-query reset)
+            const existing = card.querySelector('.refs-section');
+            if (existing) existing.remove();
+
+            const section = document.createElement('div');
+            section.className = 'refs-section';
+
+            const heading = document.createElement('div');
+            heading.className = 'refs-heading';
+            heading.textContent = '参考論文';
+            section.appendChild(heading);
+
             (evt.papers || []).forEach((p, i) => {
-              refText += `\n  [${i+1}] ${p.title || p.paper_id}`;
-              refText += `\n      ${p.paper_id} | ${p.journal || ''} | ${p.year || ''}`;
+              const item = document.createElement('div');
+              item.className = 'refs-item';
+
+              const meta = document.createElement('div');
+              meta.className = 'refs-meta';
+              meta.textContent = `[${i+1}] ${p.title || p.paper_id}  ·  ${p.paper_id} | ${p.journal || ''} | ${p.year || ''}`;
+
+              const btn = document.createElement('button');
+              btn.className = 'refs-abstract-btn';
+              btn.textContent = 'Abstract';
+              btn.dataset.title    = p.title || p.paper_id;
+              btn.dataset.pmid     = p.paper_id;
+              btn.dataset.abstract = p.abstract || '（アブストラクト未収録）';
+              btn.addEventListener('click', showAbstractModal);
+
+              item.appendChild(meta);
+              item.appendChild(btn);
+              section.appendChild(item);
             });
-            bodyEl.insertAdjacentText('beforeend', refText);
+
+            card.appendChild(section);
             break;
           }
 
@@ -625,6 +746,44 @@ async function runQuery() {
     document.querySelectorAll('.cursor').forEach(c => c.remove());
   }
 }
+
+// ── Abstract modal ─────────────────────────────────────────────────────────
+function formatAbstract(text) {
+  if (!text || text === '（アブストラクト未収録）') {
+    return `<p style="color:var(--muted)">${esc(text || 'アブストラクト未収録')}</p>`;
+  }
+  const sectionRe = /^([A-Z][A-Z\s/&]+):\s*/;
+  const parts = text.split(/\n\n+/).filter(p => p.trim());
+  const hasLabels = parts.length > 1 && parts.some(p => sectionRe.test(p));
+  if (!hasLabels) {
+    return `<p style="line-height:1.7">${esc(text)}</p>`;
+  }
+  return parts.map(part => {
+    const m = part.match(sectionRe);
+    if (m) {
+      const label = m[1];
+      const body  = esc(part.slice(m[0].length));
+      return `<div class="abstract-section"><div class="abstract-label">${esc(label)}</div><p>${body}</p></div>`;
+    }
+    return `<div class="abstract-section"><p>${esc(part)}</p></div>`;
+  }).join('');
+}
+
+function showAbstractModal(e) {
+  const btn = e.currentTarget;
+  $('modal-title').textContent = btn.dataset.title;
+  $('modal-pmid').textContent  = `PMID: ${btn.dataset.pmid}`;
+  $('modal-body').innerHTML    = formatAbstract(btn.dataset.abstract);
+  $('abstract-modal').style.display = 'flex';
+}
+
+$('modal-close').addEventListener('click', () => {
+  $('abstract-modal').style.display = 'none';
+});
+$('abstract-modal').addEventListener('click', e => {
+  if (e.target === $('abstract-modal'))
+    $('abstract-modal').style.display = 'none';
+});
 </script>
 </body>
 </html>

@@ -291,6 +291,7 @@ def query():
                                 'title': p.get('metadata', {}).get('title', ''),
                                 'journal': p.get('metadata', {}).get('journal', ''),
                                 'year': p.get('metadata', {}).get('publication_year', ''),
+                                'abstract': p.get('abstract', ''),
                             }
                             for p in contributing_papers
                         ]
@@ -334,6 +335,7 @@ def query():
                                 'title': p.get('metadata', {}).get('title', ''),
                                 'journal': p.get('metadata', {}).get('journal', ''),
                                 'year': p.get('metadata', {}).get('publication_year', ''),
+                                'abstract': p.get('abstract', ''),
                             }
                             for p in contributing_papers
                         ]

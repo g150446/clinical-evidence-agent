@@ -128,6 +128,7 @@ Comprehensive Medical Answer (streamed via SSE)
   - `POST /api/query` - Query endpoint with streaming response
 - **Memory**: 256MiB (no model loading, API client only)
 - **Dependencies**: Flask, gunicorn, requests, qdrant-client, numpy (lightweight)
+- **Abstract Modal**: Paper abstracts are displayed in a modal dialog. Structured abstracts (BACKGROUND / METHODS / RESULTS / CONCLUSIONS) are rendered with blue uppercase section headers; unstructured abstracts are shown as plain text.
 
 ---
 
@@ -520,6 +521,7 @@ python3 scripts/fetch_paper_details.py
 - Duplicate detection: Merges with existing data, adds only new papers
 - LLM filtering: Uses Gemini 2.5 Flash Lite for quality assessment
 - API rate limiting: Sleep 1 second between requests
+- **Structured abstract preservation**: PubMed `<AbstractText Label="...">` attributes are retained as `LABEL: text\n\nLABEL: text` format (e.g., BACKGROUND / METHODS / RESULTS / CONCLUSIONS). Unstructured abstracts (no Label attribute) remain as a single plain-text block.
 
 **Note**: This is the main script for initial data collection from PubMed
 
@@ -1498,6 +1500,18 @@ gcloud run services delete clinical-evidence-backend \
 ---
 
 ## Version History
+
+### v1.5 (2026-02-15) - Structured Abstract Display
+- **`scripts/fetch_paper_details.py`**: Abstract parsing now preserves PubMed section labels
+  - `<AbstractText Label="BACKGROUND">` → stored as `BACKGROUND: text\n\nMETHODS: text\n\n...`
+  - Unstructured abstracts (no Label attribute) remain a single plain-text block
+  - All domains re-fetched: pharmacologic (150 papers), surgical (65), lifestyle (64)
+- **`templates/index.html`**: Abstract modal redesigned for readability
+  - Added `formatAbstract()` JS function: splits on `\n\n`, detects `LABEL:` prefix
+  - Structured abstracts rendered with blue uppercase section headers (`.abstract-label`)
+  - Unstructured abstracts fall back to plain text — no visual regression
+  - Removed `white-space: pre-wrap`; HTML structure handles line breaks
+- **Qdrant payload update**: `abstract` field updated for 184 existing points via `set_payload` (vectors unchanged)
 
 ### v1.4 (2026-02-14) - Cloud Run Single Service Architecture
 - **Migration**: Frontend + Backend unified into single Cloud Run service
