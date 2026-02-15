@@ -6,10 +6,7 @@ HTTP:8080でFlaskを起動します...
  * Running on http://127.0.0.1:8080
  * Running on http://172.30.221.207:8080
 [33mPress CTRL+C to quit[0m
-127.0.0.1 - - [15/Feb/2026 17:59:48] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 17:59:57] "GET /api/status HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 18:00:01] "POST /api/wakeup HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 18:00:10] "GET /api/status HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 18:00:27] "GET /api/status HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 18:00:36] "GET /api/status HTTP/1.1" 200 -
-127.0.0.1 - - [15/Feb/2026 18:00:51] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 19:39:18] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 19:39:30] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 19:39:43] "GET /api/status HTTP/1.1" 200 -
+127.0.0.1 - - [15/Feb/2026 19:39:43] "POST /api/query HTTP/1.1" 200 -

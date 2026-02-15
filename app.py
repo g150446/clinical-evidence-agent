@@ -276,6 +276,14 @@ def query():
 
     def generate():
         try:
+            # Send immediate feedback that connection is established
+            yield sse({'type': 'progress', 'message': 'リクエスト受信、処理開始...'})
+            
+            # Initialize variables for bilingual support
+            import re
+            is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
+            rag_answer_en = None
+            
             # ── RAG retrieval (rag or compare) — Map-Reduce architecture ──
             rag_answer = None
             if mode in ('rag', 'compare'):
@@ -388,17 +396,20 @@ def query():
                     yield sse({'type': 'done', 'mode': mode})
                     return
                 
-                # Step 5: Translate to Japanese if original query was in Japanese
-                import re
-                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
+                # Step 5: Store English answer and translate to Japanese if original query was in Japanese
+                rag_answer_en = rag_answer  # Keep English version
                 if is_japanese and rag_answer:
                     yield sse({'type': 'progress', 'message': '日本語に翻訳中...'})
                     rag_answer = medgemma_query.translate_to_japanese(rag_answer)
 
             # ── Compare mode: emit RAG answer then stream direct ──────────
             if mode == 'compare':
-                for line in rag_answer.split('\n'):
+                # Send English version first
+                for line in rag_answer_en.split('\n'):
                     yield sse({'type': 'rag_token', 'token': line + '\n'})
+                # Then send Japanese translation if available
+                if is_japanese and rag_answer != rag_answer_en:
+                    yield sse({'type': 'rag_translation', 'token': rag_answer, 'language': 'japanese'})
                 if contributing_papers:
                     yield sse({
                         'type': 'references',
@@ -415,8 +426,6 @@ def query():
                     })
 
                 # Translate query for direct mode if Japanese
-                import re
-                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
                 if is_japanese:
                     query_en = medgemma_query.translate_query(query_text)
                 else:
@@ -435,14 +444,19 @@ def query():
                 if is_japanese and direct_answer:
                     yield sse({'type': 'progress', 'message': '直接回答を日本語に翻訳中...'})
                     translated_direct = medgemma_query.translate_to_japanese(direct_answer)
-                    yield sse({'type': 'direct_replace', 'token': translated_direct})
+                    # Send Japanese translation alongside English (don't replace)
+                    yield sse({'type': 'direct_translation', 'token': translated_direct, 'language': 'japanese'})
 
                 yield sse({'type': 'done', 'mode': 'compare'})
                 return
 
             # ── Single mode: direct or RAG ────────────────────────────────
             if mode == 'rag':
-                yield sse({'type': 'token', 'token': rag_answer})
+                # Send English version first
+                yield sse({'type': 'token', 'token': rag_answer_en})
+                # Then send Japanese translation if available
+                if is_japanese and rag_answer != rag_answer_en:
+                    yield sse({'type': 'translation', 'token': rag_answer, 'language': 'japanese'})
                 if contributing_papers:
                     yield sse({
                         'type': 'references',
@@ -459,9 +473,7 @@ def query():
                     })
             else:
                 # Direct mode: translate query if Japanese, then translate answer back
-                import re
-                is_japanese = bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', query_text))
-                
+                import medgemma_query
                 if is_japanese:
                     yield sse({'type': 'progress', 'message': '翻訳中...'})
                     query_en = medgemma_query.translate_query(query_text)
@@ -480,8 +492,8 @@ def query():
                 if is_japanese and direct_answer:
                     yield sse({'type': 'progress', 'message': '日本語に翻訳中...'})
                     translated = medgemma_query.translate_to_japanese(direct_answer)
-                    # Clear previous answer and emit translated version
-                    yield sse({'type': 'replace', 'token': translated})
+                    # Send Japanese translation alongside English (don't replace)
+                    yield sse({'type': 'translation', 'token': translated, 'language': 'japanese'})
 
             yield sse({'type': 'done', 'mode': mode})
 

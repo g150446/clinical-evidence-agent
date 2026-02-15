@@ -284,6 +284,32 @@ textarea#query-input:focus { border-color: var(--accent); }
 .response-card.direct .card-header { border-left: 3px solid var(--accent); color: var(--accent); }
 .response-card.single .card-header { border-left: 3px solid var(--accent); color: var(--accent); }
 
+/* ── Bilingual display ───────────────────────────────────────────────── */
+.bilingual-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.response-section {
+  border-bottom: 1px solid var(--border);
+}
+.response-section:last-child {
+  border-bottom: none;
+}
+.section-label {
+  background: var(--surface);
+  padding: 6px 16px;
+  font-size: .75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-bottom: 1px solid var(--border);
+}
+.response-section:first-child .section-label {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 .response-body {
   padding: 16px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
@@ -467,17 +493,44 @@ textarea#query-input:focus { border-color: var(--accent); }
     <!-- compare: RAG side -->
     <div class="response-card rag" id="card-rag">
       <div class="card-header">RAG 回答（Qdrant 検索付き）</div>
-      <div class="response-body" id="body-rag"></div>
+      <div class="bilingual-container">
+        <div class="response-section">
+          <div class="section-label">English</div>
+          <div class="response-body" id="body-rag-en"></div>
+        </div>
+        <div class="response-section">
+          <div class="section-label">日本語</div>
+          <div class="response-body" id="body-rag-jp"></div>
+        </div>
+      </div>
     </div>
     <!-- compare: direct side -->
     <div class="response-card direct" id="card-direct">
       <div class="card-header">Direct 回答（検索なし）</div>
-      <div class="response-body" id="body-direct"></div>
+      <div class="bilingual-container">
+        <div class="response-section">
+          <div class="section-label">English</div>
+          <div class="response-body" id="body-direct-en"></div>
+        </div>
+        <div class="response-section">
+          <div class="section-label">日本語</div>
+          <div class="response-body" id="body-direct-jp"></div>
+        </div>
+      </div>
     </div>
     <!-- single mode -->
     <div class="response-card single" id="card-single">
       <div class="card-header" id="card-single-title">回答</div>
-      <div class="response-body" id="body-single"></div>
+      <div class="bilingual-container">
+        <div class="response-section">
+          <div class="section-label">English</div>
+          <div class="response-body" id="body-single-en"></div>
+        </div>
+        <div class="response-section">
+          <div class="section-label">日本語</div>
+          <div class="response-body" id="body-single-jp"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -713,8 +766,9 @@ function resetUI() {
   ['card-rag','card-direct','card-single','context-panel'].forEach(id => {
     $(id).style.display = 'none';
   });
-  ['body-rag','body-direct','body-single'].forEach(id => {
-    $(id).textContent = '';
+  // Clear all bilingual response bodies
+  ['body-rag-en','body-rag-jp','body-direct-en','body-direct-jp','body-single-en','body-single-jp'].forEach(id => {
+    if ($(id)) $(id).textContent = '';
   });
   $('ctx-papers').innerHTML = '';
   $('ctx-facts').innerHTML = '';
@@ -767,7 +821,14 @@ async function runQuery() {
   const queryText = $('query-input').value.trim();
   if (!queryText) { showError('クエリを入力してください'); return; }
 
+  // Show immediate feedback before any async operations
+  const btn = $('run-btn');
+  btn.disabled = true;
+  resetUI();
+  setProgress(true, '接続中...');
+
   // Pre-flight readiness check
+  setProgress(true, 'エンドポイント状態確認中...');
   const d = await loadStatus();
   if (d) {
     const medReady = endpointStatus.medgemma === 'ready';
@@ -775,19 +836,20 @@ async function runQuery() {
     const mode = currentMode;
 
     if (mode === 'direct' && !medReady) {
+      setProgress(false);
+      btn.disabled = false;
       alert('MedGemmaエンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
       return;
     }
     if ((mode === 'rag' || mode === 'compare') && (!medReady || !sapReady)) {
+      setProgress(false);
+      btn.disabled = false;
       alert('エンドポイントが停止中です。「エンドポイント起動」ボタンで起動してください。');
       return;
     }
   }
 
-  const btn = $('run-btn');
-  btn.disabled = true;
-  resetUI();
-  setProgress(true, '接続中...');
+  setProgress(true, 'クエリ送信中...');
 
   const mode = currentMode;
 
@@ -853,38 +915,48 @@ async function runQuery() {
 
           case 'token':
             setProgress(false);
-            appendToken($('body-single'), evt.token);
+            appendToken($('body-single-en'), evt.token);
             break;
 
-          case 'replace':
-            // Replace entire content (for translation)
+          case 'translation':
+            // Japanese translation for single mode
             setProgress(false);
-            $('body-single').innerHTML = '';
-            appendToken($('body-single'), evt.token);
+            appendToken($('body-single-jp'), evt.token);
             break;
 
           case 'rag_token':
             setProgress(false);
-            appendToken($('body-rag'), evt.token);
+            appendToken($('body-rag-en'), evt.token);
+            break;
+
+          case 'rag_translation':
+            // Japanese translation for RAG answer in compare mode
+            setProgress(false);
+            appendToken($('body-rag-jp'), evt.token);
             break;
 
           case 'direct_token':
             setProgress(true, '直接回答生成中...');
-            appendToken($('body-direct'), evt.token);
+            appendToken($('body-direct-en'), evt.token);
             break;
 
-          case 'direct_replace':
-            // Replace direct answer content (for translation)
+          case 'direct_translation':
+            // Japanese translation for direct answer in compare mode
             setProgress(false);
-            $('body-direct').innerHTML = '';
-            appendToken($('body-direct'), evt.token);
+            appendToken($('body-direct-jp'), evt.token);
             break;
 
           case 'references': {
             const cardId = (mode === 'compare') ? 'card-rag' : 'card-single';
             const card = $(cardId);
-            const bodyId = (mode === 'compare') ? 'body-rag' : 'body-single';
-            removeCursor($(bodyId));
+            // Remove cursors from both English and Japanese sections
+            if (mode === 'compare') {
+              removeCursor($('body-rag-en'));
+              removeCursor($('body-rag-jp'));
+            } else {
+              removeCursor($('body-single-en'));
+              removeCursor($('body-single-jp'));
+            }
 
             // Remove any existing refs section (re-query reset)
             const existing = card.querySelector('.refs-section');
